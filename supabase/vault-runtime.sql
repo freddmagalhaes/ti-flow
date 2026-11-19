@@ -15,7 +15,7 @@ begin
   perform vault.create_secret('https://ti-flow-automacoes.meshedkayak2.chatgpt.site','ti_flow_app_url','TI Flow published origin');
  end if;
  if not exists(select 1 from vault.secrets where name='ti_flow_mail_from') then
-  perform vault.create_secret('TI Flow <ti@automacoes.tec.br>','ti_flow_mail_from','TI Flow authorized sender');
+  perform vault.create_secret('TI Flow <no-reply@flow.automacoes.tec.br>','ti_flow_mail_from','TI Flow authorized sender');
  end if;
  if not exists(select 1 from vault.secrets where name='ti_flow_delivery_enabled') then
   perform vault.create_secret('false','ti_flow_delivery_enabled','Enable only after sender verification');

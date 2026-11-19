@@ -31,7 +31,7 @@ O `.gitignore` exclui ambientes locais, credenciais, chaves privadas, dependênc
 - Interface, demonstração local, integração Supabase, esquema SQL e funções de servidor implementados.
 - A demonstração usa dados fictícios no navegador e **não é o ambiente real da equipe**. Não envia e-mails.
 - Projeto exclusivo **ti-flow** criado em **Manager Hours**, em São Paulo (referência: zhmopjbrujhvuppluaar). Tabelas, RLS, Storage privado e Realtime aplicados; nenhum banco existente foi reutilizado. A organização Automações TI foi criada gratuitamente, mas o destino foi alterado para Manager Hours a pedido do usuário.
-- O remetente escolhido é TI Flow <ti@automacoes.tec.br>, via Resend. A ativação real aguarda verificação DNS, chave do Resend e primeiro administrador.
+- O remetente escolhido é `TI Flow <no-reply@flow.automacoes.tec.br>`, via Resend. O domínio de envio é `flow.automacoes.tec.br`; a troca do nome antes de `@` não altera os registros DNS. A ativação real depende da verificação DNS e da validação do primeiro acesso.
 - Testes de banco executados em PostgreSQL embarcado (PGlite); não substituem o teste final no Supabase hospedado.
 
 ## Executar
@@ -82,7 +82,7 @@ Configure no Supabase, nunca no frontend ou no Git:
 | `ALLOWED_ORIGIN` | Mesma origem de `APP_URL`. |
 | `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` | Transporte de e-mail autenticado. |
 | `SMTP_PORT` | `465`, TLS implícito. O Supabase bloqueia saída nas portas 25 e 587. |
-| `MAIL_FROM` | Remetente autorizado no provedor. |
+| `MAIL_FROM` | `TI Flow <no-reply@flow.automacoes.tec.br>`. Se definida nas Edge Function Secrets, prevalece sobre o valor do Vault. |
 | `MAIL_ENCRYPTION_KEY` | 32 bytes aleatórios em Base64, para criptografar o conteúdo temporário da fila. |
 | `EMAIL_WORKER_SECRET` | Segredo aleatório exclusivo do processador de e-mails. |
 | `EMAIL_DELIVERY_ENABLED` | `false` durante configuração; `true` ao iniciar o teste controlado de ativação. |

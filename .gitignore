@@ -1,0 +1,61 @@
+# Segredos e variáveis locais. Somente o modelo vazio é versionado.
+.env
+.env.*
+!.env.example
+*.local
+
+# Credenciais e chaves privadas
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+.npmrc
+.netrc
+_netrc
+.aws/
+.ssh/
+.credentials/
+credentials.json
+service-account*.json
+service_account*.json
+
+# Dependências, compilação e testes
+node_modules/
+dist/
+build/
+coverage/
+.vite/
+.cache/
+*.tsbuildinfo
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Estado local das plataformas e ferramentas
+.vercel/
+.sites/
+supabase/.temp/
+supabase/.branches/
+.idea/
+.vscode/
+
+# Backups e arquivos temporários; os scripts SQL de instalação permanecem versionados.
+backups/
+dumps/
+*.dump
+*.backup
+*.bak
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+Desktop.ini

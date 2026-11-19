@@ -1,0 +1,5 @@
+[functions.ti-flow]
+verify_jwt = false
+# The router validates bearer sessions for each protected endpoint.
+# Public endpoints: login, recovery, password reset and health.
+# Email worker requires its independent server-only secret.

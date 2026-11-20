@@ -48,7 +48,7 @@ export default function App() {
  const loadVersion=useRef(0),systemAdmin=user?.role==='system_admin',canAdmin=systemAdmin||user?.role==='admin';
  const selectedCompanyId=companyId||user?.company_id||'',currentCompany=data.companies.find(c=>c.id===selectedCompanyId);
  const repo=useMemo(()=>user?(demo?demoRepository(user,selectedCompanyId):liveRepository(user,selectedCompanyId)):null,[user,demo,selectedCompanyId]);
- function selectCompany(id:string){loadVersion.current++;setCompanyId(id);setData({companies:data.companies,cards:[],profiles:[],events:[]});setDrawer(null);setConfirmClose(null);setReopening(null);setAddingUser(false);setQuery('');setAssignee('all');setPriority('all');setShowFilters(false);}
+ function selectCompany(id:string){if(id===selectedCompanyId)return;loadVersion.current++;setCompanyId(id);setData({companies:data.companies,cards:[],profiles:[],events:[]});setDrawer(null);setConfirmClose(null);setReopening(null);setAddingUser(false);setQuery('');setAssignee('all');setPriority('all');setShowFilters(false);}
  useEffect(()=>{if(user){setCompanyId(user.company_id);if(new URLSearchParams(window.location.search).has('cobranca')&&['admin','system_admin'].includes(user.role))setView('billing');else if(user.role==='system_admin')setView('companies');}},[user?.id]);
  useEffect(()=>{currentProfile().then(setUser).catch(()=>{}).finally(()=>setChecking(false));},[]);
  useEffect(()=>{window.scrollTo(0,0);},[view,user?.id]);

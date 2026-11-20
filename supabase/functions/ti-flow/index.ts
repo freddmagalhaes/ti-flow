@@ -1,3 +1,4 @@
+import {processNewsletter,requestSubscription,newsletterOverview,validEmail,validToken} from './newsletter.ts';
 import {createClient} from 'npm:@supabase/supabase-js@2.119.0';
 import {validPassword,temporaryPassword,sha256,secureToken,encryptPayload,decryptPayload} from './policy.ts';
 import {mailReady,emailContent,sendEmail} from './mail.ts';
@@ -59,8 +60,20 @@ Deno.serve(async request=>{
   if(origin)assert(origin===allowedOrigin,'Origem não autorizada.',403);
   const action=new URL(request.url).pathname.split('/ti-flow/')[1]??'';
   if(action==='health')return respond({smtp_ready:mailReady(),connected:true});
-  if(action==='worker/send-emails'){const supplied=request.headers.get('X-Worker-Secret'),expected=setting('EMAIL_WORKER_SECRET');assert(expected&&supplied&&await sha256(supplied)===await sha256(expected),'Não autorizado.',401);return respond(mailReady()?await processEmails():{sent:0,pending_configuration:true});}
+  if(action==='worker/send-emails'){const supplied=request.headers.get('X-Worker-Secret'),expected=setting('EMAIL_WORKER_SECRET');assert(expected&&supplied&&await sha256(supplied)===await sha256(expected),'Não autorizado.',401);if(!mailReady())return respond({sent:0,pending_configuration:true});const transactional=await processEmails();return respond({...transactional,newsletter:await processNewsletter(admin)});}
   const raw=await request.text();assert(raw.length<25000,'Solicitação muito grande.',413);const body=JSON.parse(raw||'{}');
+  if(action.startsWith('newsletter/')){
+   if(action==='newsletter/subscribe'){
+    assert(mailReady()&&setting('RESEND_API_KEY'),'O envio de novidades está temporariamente indisponível.',503);
+    const email=String(body.email??'').trim().toLowerCase();assert(validEmail(email)&&body.consent===true,'Informe um e-mail válido e autorize o recebimento.');
+    if(body.website)return respond({ok:true});
+    await authLimit(request,email,'newsletter-subscribe',2);await requestSubscription(admin,email);return respond({ok:true});
+   }
+   assert(validToken(body.token),'Este link é inválido ou expirou.');await authLimit(request,'token','newsletter-token',20);
+   if(action==='newsletter/confirm'){const confirmed=check(await admin.rpc('newsletter_confirm',{p_hash:await sha256(body.token)}));assert(confirmed,'Este link expirou ou já foi utilizado.');return respond({ok:true});}
+   if(action==='newsletter/unsubscribe'){check(await admin.rpc('newsletter_unsubscribe',{p_hash:await sha256(body.token)}));return respond({ok:true});}
+   throw new HttpError(404,'Operação não encontrada.');
+  }
   if(action==='auth/login'){
    const username=String(body.username??'').trim().toLowerCase();await authLimit(request,username,'login');const profile=await findByUsername(username);
    const invalid='Usuário ou senha inválidos.';assert(profile&&await accountEnabled(profile),invalid,401);
@@ -93,6 +106,15 @@ Deno.serve(async request=>{
   }
   if(action.startsWith('system/')){
    assert(isSystemAdmin(profile),'Acesso exclusivo do administrador do sistema.',403);
+   if(action==='system/newsletter'){return respond(await newsletterOverview(admin));}
+   if(action==='system/newsletter-draft'){
+    const subject=String(body.subject??'').trim(),content=String(body.content??'').trim();assert(subject.length>=3&&subject.length<=160&&content.length>=10&&content.length<=12000,'Preencha assunto e conteúdo da edição.');
+    const campaign=check(await admin.from('newsletter_campaigns').insert({subject,content,created_by:profile.id}).select('id').single());return respond({campaign});
+   }
+   if(action==='system/newsletter-send'){
+    assert(mailReady()&&setting('RESEND_API_KEY'),'O envio está indisponível.',503);assert(body.confirm===true,'Confirme o envio aos assinantes.');
+    const recipients=check(await admin.rpc('newsletter_publish',{p_id:body.id}));return respond({ok:true,recipients});
+   }
    if(action==='system/create-company'){
     assert(mailReady(),'Configure o envio de e-mail antes de cadastrar empresas.',503);
     const name=String(body.name??'').trim(),slug=String(body.slug??'').trim().toLowerCase();

@@ -14,6 +14,18 @@ Aplicação em React, TypeScript e Supabase para a equipe Automações TI.
 
 Em novas instalações, aplique `supabase/multi-company.sql` uma única vez depois de `schema.sql` e `storage-and-realtime.sql`. Publique `permissions.ts` junto aos demais arquivos da função. Em produção, aplique a migração versionada antes de atualizar a função e o frontend. Os testes de isolamento usam duas empresas locais, sem enviar e-mails reais.
 
+## Guia público e newsletter
+
+- O guia fica em /blog e a assinatura em /blog/newsletter, na mesma origem do painel. Não exigem login ou outro subdomínio.
+- A newsletter usa TI Flow Novidades <news-flow@flow.automacoes.tec.br> e a RESEND_API_KEY já configurada no servidor. O domínio flow.automacoes.tec.br precisa estar verificado no Resend.
+- A inscrição tem consentimento explícito e confirmação por e-mail com token de uso único válido por 24 horas. Abrir o link não confirma automaticamente; é preciso clicar no botão da página. Assinar não cria acesso ao painel.
+- Cada edição contém cancelamento. Cancelar também remove os próximos envios da fila; uma mensagem já aceita pelo provedor não pode ser recolhida.
+- Somente o administrador do sistema acessa Newsletter no menu: escreve assunto e conteúdo, salva rascunho, revisa a prévia e confirma o envio para os assinantes confirmados. As edições não são disparadas automaticamente ao alterar o produto.
+- O Cron existente processa as mensagens após os e-mails transacionais. Reservas, limite de tentativas e chave de idempotência protegem contra reenvios; o painel mostra fila, aceitação pelo Resend, falhas e cancelamentos. Aceitação pelo provedor não significa entrega na caixa de entrada.
+- As tabelas de assinantes, edições e fila têm RLS e são exclusivas do servidor. O navegador e os administradores das empresas não podem listar assinantes ou chamar suas funções SQL.
+- Instalação: aplicar supabase/newsletter.sql depois de multi-company.sql; publicar newsletter.ts junto aos outros arquivos da Edge Function. Em produção, aplicar a migração antes da função e do frontend. Nenhuma alteração DNS adicional é necessária quando o domínio de envio já está verificado.
+- O cadastro de usuários mostra a empresa e apenas perfis da empresa. Falhas do servidor aparecem no formulário, preservando os dados para correção. O login permanece único globalmente.
+
 ## Publicar na Vercel
 
 1. Importe o repositório `freddmagalhaes/ti-flow` e selecione a branch `main`, usando a raiz do repositório.
@@ -43,7 +55,7 @@ O `.gitignore` exclui ambientes locais, credenciais, chaves privadas, dependênc
 - Interface, demonstração local, integração Supabase, esquema SQL e funções de servidor implementados.
 - A demonstração usa dados fictícios no navegador e **não é o ambiente real da equipe**. Não envia e-mails.
 - Projeto exclusivo **ti-flow** criado em **Manager Hours**, em São Paulo (referência: zhmopjbrujhvuppluaar). Tabelas, RLS, Storage privado e Realtime aplicados; nenhum banco existente foi reutilizado. A organização Automações TI foi criada gratuitamente, mas o destino foi alterado para Manager Hours a pedido do usuário.
-- O remetente escolhido é `TI Flow <no-reply@flow.automacoes.tec.br>`, via Resend. O domínio de envio é `flow.automacoes.tec.br`; a troca do nome antes de `@` não altera os registros DNS. A ativação real depende da verificação DNS e da validação do primeiro acesso.
+- O remetente escolhido é `TI Flow <no-reply@flow.automacoes.tec.br>`, via Resend. O domínio de envio é `flow.automacoes.tec.br`; a troca do nome antes de `@` não altera os registros DNS. O domínio foi verificado e os e-mails de acesso foram validados em produção.
 - Testes de banco executados em PostgreSQL embarcado (PGlite); não substituem o teste final no Supabase hospedado.
 
 ## Executar
@@ -107,7 +119,7 @@ As variáveis padrão `SUPABASE_URL`, `SUPABASE_ANON_KEY` e `SUPABASE_SERVICE_RO
 
 1. A migração `vault-runtime.sql` já prepara as chaves internas. Em novas instalações, no Vault criar `ti_flow_worker_url` com `https://<project-ref>.supabase.co/functions/v1/ti-flow/worker/send-emails` e `ti_flow_worker_secret` com o mesmo valor de `EMAIL_WORKER_SECRET`.
 2. Aplicar `supabase/cron.sql`. O Cron aciona a função a cada 30 segundos. A fila usa reserva de mensagens e no máximo cinco envios simultâneos.
-3. Após verificar o domínio no Resend e configurar a chave de envio, habilitar o envio no Vault e executar `scripts/activate-admin.mjs` (entrada por stdin oculta), ou chamar `POST /functions/v1/ti-flow/admin/bootstrap` com `X-Bootstrap-Secret`, passando JSON com `full_name`, `username` e `email` do administrador. O perfil é sempre `admin`; a rota recusa novas chamadas quando já há qualquer perfil. Enviar o segredo somente por ferramenta segura, sem gravá-lo em arquivos ou argumentos de shell.
+3. Após verificar o domínio no Resend e configurar a chave de envio, habilitar o envio no Vault e executar `scripts/activate-admin.mjs` (entrada por stdin oculta), ou chamar `POST /functions/v1/ti-flow/admin/bootstrap` com `X-Bootstrap-Secret`, passando JSON com `full_name`, `username` e `email` do administrador. O perfil é sempre `system_admin`; a rota recusa novas chamadas quando já há qualquer perfil. Enviar o segredo somente por ferramenta segura, sem gravá-lo em arquivos ou argumentos de shell.
 4. O administrador recebe os mesmos dois e-mails e deve trocar a senha no primeiro acesso. Remover `BOOTSTRAP_SECRET` depois de validar a criação.
 5. Confirmar os dois envios, intervalo, validade de 24 horas da senha temporária e troca obrigatória. Só então cadastrar os demais integrantes.
 
@@ -141,10 +153,10 @@ Executar os testes e a compilação, sincronizar a fonte pelo helper do Sites e 
 
 ## Validação
 
-- 50 testes automatizados: política de senhas, criptografia, permissões, sessão revogada, bloqueio inicial, privilégios, comentários, imutabilidade, reabertura, fila dos e-mails e isolamento entre empresas, inclusive arquivos e administração.
+- 59 testes automatizados, incluindo confirmação, cancelamento e processamento da newsletter: política de senhas, criptografia, permissões, sessão revogada, bloqueio inicial, privilégios, comentários, imutabilidade, reabertura, fila dos e-mails e isolamento entre empresas, inclusive arquivos e administração.
 - Compilação TypeScript/Vite e verificação Deno das funções.
 - Fluxos pela interface: criação, checklist, comentários, conclusão, consulta e reabertura; movimentação por teclado.
 - Dependências de produção: auditoria npm sem vulnerabilidades conhecidas no momento da entrega.
 - Ferramentas de desenvolvimento: há aviso transitivo do `picomatch` sem versão corrigida publicada na consulta realizada. Os padrões de compilação e testes são controlados pelo projeto; essas ferramentas não são publicadas como servidor de produção.
 
-O projeto hospedado já passou pela verificação inicial: 6 tabelas com RLS, bucket privado, políticas de arquivos, função publicada e bloqueio das rotas administrativas sem sessão. O advisor retornou somente três avisos informativos de [RLS sem política pública](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy), intencionais nas tabelas exclusivas do servidor. Após ativar o provedor, repetir a validação com os três perfis reais, Storage, Realtime, primeiro acesso, recuperação e os dois e-mails. Os testes remotos de autenticação por credenciais reais e dos dois e-mails ainda dependem da ativação do Resend. A validação pública do servidor já confirmou bloqueio de acesso anônimo, administração sem sessão, processador sem segredo, origens externas e configuração privada.
+O projeto hospedado já passou pela verificação inicial: 6 tabelas com RLS, bucket privado, políticas de arquivos, função publicada e bloqueio das rotas administrativas sem sessão. O advisor retornou somente três avisos informativos de [RLS sem política pública](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy), intencionais nas tabelas exclusivas do servidor. Após ativar o provedor, repetir a validação com os três perfis reais, Storage, Realtime, primeiro acesso, recuperação e os dois e-mails. O primeiro acesso do administrador do sistema e os dois e-mails transacionais já foram validados em produção. A validação pública do servidor já confirmou bloqueio de acesso anônimo, administração sem sessão, processador sem segredo, origens externas e configuração privada.

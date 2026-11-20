@@ -153,7 +153,7 @@ Executar os testes e a compilação, sincronizar a fonte pelo helper do Sites e 
 
 ## Validação
 
-- 59 testes automatizados, incluindo confirmação, cancelamento e processamento da newsletter: política de senhas, criptografia, permissões, sessão revogada, bloqueio inicial, privilégios, comentários, imutabilidade, reabertura, fila dos e-mails e isolamento entre empresas, inclusive arquivos e administração.
+- 93 testes automatizados, incluindo confirmação, cancelamento e processamento da newsletter: política de senhas, criptografia, permissões, sessão revogada, bloqueio inicial, privilégios, comentários, imutabilidade, reabertura, fila dos e-mails e isolamento entre empresas, inclusive arquivos e administração.
 - Compilação TypeScript/Vite e verificação Deno das funções.
 - Fluxos pela interface: criação, checklist, comentários, conclusão, consulta e reabertura; movimentação por teclado.
 - Dependências de produção: auditoria npm sem vulnerabilidades conhecidas no momento da entrega.
@@ -165,10 +165,32 @@ O projeto hospedado já passou pela verificação inicial: 6 tabelas com RLS, bu
 
 Aplicar, após multi-company.sql, as migrações geradas em supabase/migrations/20261120114748_scope_usernames_by_environment.sql e 20261120165243_expand_workspace_profiles_and_statuses.sql. Publicar todos os arquivos TypeScript da função ti-flow.
 
-O login agora informa ambiente e identificador da empresa. Links de acesso: /?empresa=sistema-plus ou /?ambiente=sistema para administradores globais. Clientes antigos só são reconhecidos sem ambiente quando o login não é ambíguo. A recuperação de senha usa o mesmo ambiente. E-mails novos incluem empresa e link correto.
+O login usa somente usuário/e-mail e senha em /entrar. A conta autenticada determina a empresa e o perfil. Um nome repetido entre empresas exige o e-mail exclusivo da conta; não há seleção nem listagem de clientes antes de entrar. A recuperação aceita usuário ou e-mail e responde de forma genérica. Links antigos continuam abrindo o acesso, mas não decidem a empresa da conta.
 
 O administrador do sistema carrega cada ambiente pelo servidor com sessão validada. Pode criar e editar cards, atribuir a qualquer usuário ativo da empresa (incluindo convidados), gerenciar perfis e editar os dados cadastrais das empresas. Usuários convidados só entram após trocar a senha.
 
 Os quadros são A FAZER, EM DESENVOLVIMENTO, AGUARDANDO e EM TESTE; os registros anteriores preservam seus estados. A edição envia apenas os campos permitidos, sem number/code/IDs. O formulário é fechado após criar e uma nova abertura começa limpa.
 
 O avatar abre o perfil pessoal (nome, telefone, cargo e departamento). E-mail de acesso e login permanecem protegidos, inclusive por trigger no Auth para impedir alteração do e-mail diretamente pela API. Dados da empresa ficam disponíveis pelo menu lateral; gestores e administradores podem editá-los na própria empresa.
+
+## Acesso automático por conta
+
+A tela de login usa apenas usuário/e-mail e senha. Empresa e perfil vêm da conta autenticada; não há seleção de empresa antes do login. Nomes que se repetem entre empresas são resolvidos pelo e-mail exclusivo de acesso. Nenhuma tentativa percorre senhas de vários clientes. A consulta de e-mail fica em função SQL exclusiva do servidor; a recuperação mantém resposta genérica. A migração add_public_contact_messages inclui esta consulta e deve ser aplicada antes da nova função.
+
+A identificação automática não pesquisa senhas entre vários usuários: cada tentativa corresponde a uma única conta.
+
+## Área pública e contato
+
+A apresentação do produto fica em /; o painel em /entrar; os guias em /blog; newsletter em /blog/newsletter e contato em /blog/contato. A visita não requer login. A criação de edições da newsletter permanece exclusiva do administrador do sistema.
+
+O formulário valida consentimento, assunto e dados de contato; usa limite de tentativas e uma fila privada. Comercial, Dúvida e Suporte são canais lógicos. Enquanto as caixas dos departamentos não existem, o proprietário autorizou encaminhamento para seu endereço de notificação, armazenado no Vault como ti_flow_contact_notification_email. Cada aviso identifica o canal e usa o endereço do visitante apenas como Reply-To. As mensagens também ficam em Contatos, exclusivo do administrador do sistema. Isto não cria caixas de entrada nem configura recebimento de e-mails diretos para os aliases. WhatsApp: +55 31 98980-5397.
+
+## Cobrança Asaas
+
+Planos por empresa: R$ 59,90 mensal ou R$ 599,00 anual, até 10 usuários ativos (administradores globais não consomem vaga). Os valores são obtidos no servidor; o cliente não determina o preço. Não há suspensão automática dos dados por falta de pagamento nesta implementação.
+
+Configurar ASAAS_API_KEY e ASAAS_ENVIRONMENT=sandbox nos Secrets da função; a chave nunca vai ao frontend. O token independente do webhook é gerado no Vault. Em Cobrança, o administrador do sistema ativa a integração, que cadastra o webhook autenticado no Asaas. Somente administradores da empresa ou do sistema podem contratar, consultar faturas e cancelar renovação. O consentimento para a contratação e o compartilhamento de dados cadastrais com o Asaas é exigido.
+
+A assinatura usa a Fatura do Asaas: dados de cartão não são capturados pelo Flow. Pix gera faturas para pagamento em cada renovação, com Pix Automático desabilitado; cartão utiliza recorrência no Asaas após o cadastro do cartão na fatura. O webhook consulta o estado financeiro no provedor e processa cada evento de forma idempotente; retorno do navegador não é confirmação de pagamento. Eventos antigos de atraso não substituem pagamento recebido, nem eventos pagos antigos substituem estornos. Falha ambígua na criação exige conciliação antes de uma nova assinatura. Cancelar a renovação não solicita estorno.
+
+Aplicar em ordem as migrações add_public_contact_messages e add_company_billing depois das migrações de ambientes e perfis. Publicar todos os arquivos .ts da função ti-flow. Homologar em Sandbox antes de ativar produção; os ambientes e suas faturas ficam separados.

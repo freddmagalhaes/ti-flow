@@ -1,7 +1,7 @@
 export type Role = 'system_admin' | 'admin' | 'manager' | 'technician';
 export type Status = 'pending' | 'in_progress' | 'third_party' | 'testing' | 'completed';
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
-export type View = 'board' | 'dashboard' | 'archive' | 'team' | 'companies' | 'newsletter' | 'settings';
+export type View = 'board' | 'dashboard' | 'archive' | 'team' | 'companies' | 'newsletter' | 'contacts' | 'billing' | 'settings';
 export interface Company {legal_name?:string;tax_id?:string;contact_email?:string;phone?:string;address?:string;website?:string;id:string;name:string;slug:string;active:boolean;created_at:string}
 export interface CompanyInput {name:string;slug:string;administrator:{full_name:string;username:string;email:string}}
 export interface Profile {phone?:string;job_title?:string;department?:string; id:string;company_id:string; full_name:string; username:string; role:Role; active:boolean; must_change_password:boolean; email?:string; welcome_status?:string; password_status?:string; }

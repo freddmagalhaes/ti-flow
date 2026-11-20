@@ -1,3 +1,5 @@
+import {billingOverview,setupBilling,subscribeCompany,syncPayments,cancelSubscription,billingWebhook,billingEnvironment} from './billing.ts';
+import {contactInput,processContactMessages} from './contact.ts';
 import {profileChanges,companyChanges} from './profile-data.ts';
 import {processNewsletter,requestSubscription,newsletterOverview,validEmail,validToken} from './newsletter.ts';
 import {validUsername,suggestUsernames} from './usernames.ts';
@@ -11,7 +13,7 @@ const url=Deno.env.get('SUPABASE_URL')!;
 const serverKey=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const publicKey=Deno.env.get('SUPABASE_ANON_KEY')!;
 const admin=createClient(url,serverKey,{auth:{persistSession:false,autoRefreshToken:false}});
-const runtimeNames=['APP_URL','ALLOWED_ORIGIN','MAIL_FROM','MAIL_ENCRYPTION_KEY','EMAIL_WORKER_SECRET','BOOTSTRAP_SECRET','EMAIL_DELIVERY_ENABLED'];
+const runtimeNames=['APP_URL','ALLOWED_ORIGIN','MAIL_FROM','MAIL_ENCRYPTION_KEY','EMAIL_WORKER_SECRET','BOOTSTRAP_SECRET','EMAIL_DELIVERY_ENABLED','CONTACT_NOTIFICATION_EMAIL','ASAAS_WEBHOOK_TOKEN'];
 async function loadRuntimeConfig(){
  const {data,error}=await admin.rpc('ti_flow_runtime_config');
  if(error||!data)throw new HttpError(503,'O ambiente está em configuração. Tente novamente em instantes.');
@@ -27,7 +29,7 @@ async function profileFor(id:string):Promise<Profile> {const {data}=await admin.
 async function companyFor(id:string){const {data,error}=await admin.from('companies').select('*').eq('id',id).maybeSingle();assert(!error&&data,'Empresa indisponível.',403);return data;}
 async function accountEnabled(profile:Profile){return profile.active&&(isSystemAdmin(profile)||(await companyFor(profile.company_id)).active);}
 async function actor(request:Request,allowPassword=false):Promise<{profile:Profile;token:string}> {const token=request.headers.get('Authorization')?.replace(/^Bearer /i,'');assert(token,'Sua sessão expirou. Entre novamente.',401);const {data,error}=await admin.auth.getUser(token);assert(!error&&data.user,'Sua sessão expirou. Entre novamente.',401);const scoped=createClient(url,publicKey,{global:{headers:{Authorization:`Bearer ${token}`}},auth:{persistSession:false}});const {data:valid,error:sessionError}=await scoped.rpc('session_valid');assert(!sessionError&&valid,'Sua sessão expirou. Entre novamente.',401);const profile=await profileFor(data.user.id);assert(await accountEnabled(profile),'Seu acesso ou sua empresa foi desativada.',403);assert(allowPassword||!profile.must_change_password,'Altere sua senha antes de continuar.',403);return {profile,token};}
-async function authLimit(request:Request,name:string,action:string,limit=10) {const ip=request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()??'unknown';const key=await sha256(`${action}:${ip}:${name.toLowerCase()}`);const allowed=check(await admin.rpc('consume_auth_attempt',{p_key:key,p_limit:limit}));assert(allowed,'Muitas tentativas. Aguarde 15 minutos e tente novamente.',429);const global=check(await admin.rpc('consume_auth_attempt',{p_key:await sha256(`${action}:ip:${ip}`),p_limit:60}));assert(global,'Muitas tentativas. Aguarde 15 minutos e tente novamente.',429);}
+async function authLimit(request:Request,name:string,action:string,limit=10,globalLimit=60) {const ip=request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()??'unknown';const key=await sha256(`${action}:${ip}:${name.toLowerCase()}`);const allowed=check(await admin.rpc('consume_auth_attempt',{p_key:key,p_limit:limit}));assert(allowed,'Muitas tentativas. Aguarde 15 minutos e tente novamente.',429);const global=check(await admin.rpc('consume_auth_attempt',{p_key:await sha256(`${action}:ip:${ip}`),p_limit:globalLimit}));assert(global,'Muitas tentativas. Aguarde 15 minutos e tente novamente.',429);}
 async function usernameAvailability(companyId:string,username:string,fullName:string,system=false){
  const query=()=>{let q=admin.from('profiles').select('username');q=system?q.eq('role','system_admin'):q.eq('company_id',companyId).neq('role','system_admin');return q;};
  const collision=check(await query().eq('username',username).limit(1))??[];
@@ -49,7 +51,7 @@ async function revokeAllWithNewPassword(email:string,password:string) {const aut
 async function resetTemporary(profile:Profile) {assert(mailReady(),'Configure e valide o serviço de e-mail antes de cadastrar ou reenviar senhas.',503);const email=await getEmail(profile.id),password=temporaryPassword();check(await admin.from('profiles').update({must_change_password:true,password_expires_at:null,password_status:'programado'}).eq('id',profile.id));check(await admin.from('email_jobs').update({state:'cancelled',encrypted_payload:null}).eq('user_id',profile.id).in('state',['scheduled','sending','blocked','failed']).eq('kind','password'));check(await admin.auth.admin.updateUserById(profile.id,{password}));await revokeAllWithNewPassword(email,password);const firstWelcome=profile.welcome_status!=='enviado';if(firstWelcome){check(await admin.from('email_jobs').update({state:'scheduled',send_at:new Date().toISOString(),attempts:0}).eq('user_id',profile.id).eq('kind','welcome').in('state',['failed','scheduled','sending','cancelled']));check(await admin.from('profiles').update({welcome_status:'aguardando'}).eq('id',profile.id));}check(await admin.from('email_jobs').insert({user_id:profile.id,kind:'password',recipient:email,encrypted_payload:await encryptPayload({password},encryptionKey()),state:firstWelcome?'blocked':'scheduled',send_at:firstWelcome?null:new Date().toISOString()}));}
 async function createAccount(body:Record<string,unknown>) {
  assert(mailReady(),'Configure e valide o serviço de e-mail antes de cadastrar usuários.',503);
- const name=String(body.full_name??'').trim(),username=String(body.username??'').trim().toLowerCase(),email=String(body.email??'').trim();
+ const name=String(body.full_name??'').trim(),username=String(body.username??'').trim().toLowerCase(),email=String(body.email??'').trim().toLowerCase();
  assert(name.length>=2&&name.length<=160&&validUsername(username)&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)&&email.length<=254&&['system_admin','admin','manager','technician'].includes(String(body.role)),'Verifique nome, login, e-mail e perfil.');
  const companyId=String(body.company_id??'');const company=await companyFor(companyId);assert(company.active,'Ative a empresa antes de cadastrar usuários.');
  await duplicateUsername(companyId,username,name,body.role==='system_admin');
@@ -57,7 +59,7 @@ async function createAccount(body:Record<string,unknown>) {
  const {data,error}=await admin.auth.admin.createUser({email,password,email_confirm:true});
  assert(!error&&data.user,'Não foi possível criar a conta. Verifique se o e-mail já está cadastrado.');
  const record=await admin.rpc('create_company_account_records',{p_user_id:data.user.id,p_name:name,p_username:username,p_role:body.role,p_email:email,p_encrypted:encrypted,p_company:companyId});
- if(record.error){await admin.auth.admin.deleteUser(data.user.id);if(record.error.code==='23505')await duplicateUsername(companyId,username,name,body.role==='system_admin');throw new HttpError(400,'Não foi possível concluir o cadastro. Confira os dados e tente novamente.');}
+ if(record.error){await admin.auth.admin.deleteUser(data.user.id);if(record.error.message.includes('Limite de usuários ativos'))throw new HttpError(409,'Limite de 10 usuários ativos atingido. Desative um acesso ou solicite a revisão do plano.');if(record.error.code==='23505')await duplicateUsername(companyId,username,name,body.role==='system_admin');throw new HttpError(400,'Não foi possível concluir o cadastro. Confira os dados e tente novamente.');}
  return {ok:true,id:data.user.id};
 }
 async function workspaceData(companyId:string){
@@ -67,7 +69,7 @@ async function workspaceData(companyId:string){
  for(const p of profiles)p.email=await getEmail(String(p.id));
  return {cards,profiles,events,companies};
 }
-async function processEmails() {assert(mailReady(),'Email delivery is not enabled.',503);const jobs=(check(await admin.rpc('claim_email_jobs'))??[]) as {id:string;user_id:string;kind:string;recipient:string;encrypted_payload:string|null;claim_token:string}[];let sent=0,failed=0;await Promise.all(jobs.map(async(job)=>{let success=false;try{const p=await profileFor(job.user_id);if(!await accountEnabled(p)){await admin.from('email_jobs').update({state:'cancelled',encrypted_payload:null}).eq('id',job.id).eq('claim_token',job.claim_token);return;}const payload=job.encrypted_payload?await decryptPayload<{password?:string;token?:string}>(job.encrypted_payload,encryptionKey()):{};const company=await companyFor(p.company_id);await sendEmail(job.id,job.recipient,emailContent(job.kind,{...p,company_name:company.name,company_slug:company.slug},payload));success=true;sent++;}catch{failed++;/* Never log credentials, bodies, SMTP responses or recipient addresses. */}check(await admin.rpc('finish_email_job',{p_id:job.id,p_claim:job.claim_token,p_success:success}));}));
+async function processEmails() {assert(mailReady(),'Email delivery is not enabled.',503);const jobs=(check(await admin.rpc('claim_email_jobs'))??[]) as {id:string;user_id:string;kind:string;recipient:string;encrypted_payload:string|null;claim_token:string}[];let sent=0,failed=0;await Promise.all(jobs.map(async(job)=>{let success=false;try{const p=await profileFor(job.user_id);if(!await accountEnabled(p)){await admin.from('email_jobs').update({state:'cancelled',encrypted_payload:null}).eq('id',job.id).eq('claim_token',job.claim_token);return;}const payload=job.encrypted_payload?await decryptPayload<{password?:string;token?:string}>(job.encrypted_payload,encryptionKey()):{};const company=await companyFor(p.company_id);await sendEmail(job.id,job.recipient,emailContent(job.kind,{...p,email:job.recipient,company_name:company.name,company_slug:company.slug},payload));success=true;sent++;}catch{failed++;/* Never log credentials, bodies, SMTP responses or recipient addresses. */}check(await admin.rpc('finish_email_job',{p_id:job.id,p_claim:job.claim_token,p_success:success}));}));
  await admin.from('email_jobs').update({encrypted_payload:null,state:'failed'}).lt('created_at',new Date(Date.now()-24*60*60*1000).toISOString()).in('state',['blocked','failed']);
  await admin.from('password_resets').delete().lt('expires_at',new Date().toISOString());await admin.from('auth_attempts').delete().lt('window_start',new Date(Date.now()-86400000).toISOString());return {sent,failed};}
 
@@ -85,8 +87,16 @@ Deno.serve(async request=>{
   if(origin)assert(origin===allowedOrigin,'Origem não autorizada.',403);
   const action=new URL(request.url).pathname.split('/ti-flow/')[1]??'';
   if(action==='health')return respond({smtp_ready:mailReady(),connected:true});
-  if(action==='worker/send-emails'){const supplied=request.headers.get('X-Worker-Secret'),expected=setting('EMAIL_WORKER_SECRET');assert(expected&&supplied&&await sha256(supplied)===await sha256(expected),'Não autorizado.',401);if(!mailReady())return respond({sent:0,pending_configuration:true});const transactional=await processEmails();return respond({...transactional,newsletter:await processNewsletter(admin)});}
-  const raw=await request.text();assert(raw.length<25000,'Solicitação muito grande.',413);const body=JSON.parse(raw||'{}');
+  if(action==='worker/send-emails'){const supplied=request.headers.get('X-Worker-Secret'),expected=setting('EMAIL_WORKER_SECRET');assert(expected&&supplied&&await sha256(supplied)===await sha256(expected),'Não autorizado.',401);if(!mailReady())return respond({sent:0,pending_configuration:true});const transactional=await processEmails();return respond({...transactional,newsletter:await processNewsletter(admin),contact:await processContactMessages(admin)});}
+  const raw=await request.text();assert(raw.length<(action==='billing/webhook'?100000:25000),'Solicitação muito grande.',413);const body=JSON.parse(raw||'{}');
+  if(action==='billing/webhook'){
+   const supplied=request.headers.get('asaas-access-token'),expected=setting('ASAAS_WEBHOOK_TOKEN');assert(expected&&supplied&&await sha256(supplied)===await sha256(expected),'Não autorizado.',401);const receivedEnvironment=new URL(request.url).searchParams.get('environment');if(receivedEnvironment&&receivedEnvironment!==billingEnvironment())return respond({received:true,ignored_environment:true});return respond(await billingWebhook(admin,body));
+  }
+  if(action==='public/contact'){
+   let input;try{input=contactInput(body);}catch(e){throw new HttpError(400,(e as Error).message);}if(body.website)return respond({ok:true});
+   await authLimit(request,input.email,'public-contact',3,5);assert(mailReady()&&setting('RESEND_API_KEY'),'O contato está temporariamente indisponível. Use os endereços de e-mail ou o WhatsApp.',503);
+   check(await admin.from('contact_messages').insert(input));return respond({ok:true});
+  }
   if(action.startsWith('newsletter/')){
    if(action==='newsletter/subscribe'){
     assert(mailReady()&&setting('RESEND_API_KEY'),'O envio de novidades está temporariamente indisponível.',503);
@@ -100,14 +110,14 @@ Deno.serve(async request=>{
    throw new HttpError(404,'Operação não encontrada.');
   }
   if(action==='auth/login'){
-   const username=String(body.username??'').trim().toLowerCase();await authLimit(request,username,'login');const profile=await findLoginProfile(admin,username,body) as Profile|null;
+   const username=String(body.username??'').trim().toLowerCase();await authLimit(request,username,'login');const profile=await findLoginProfile(admin,username,{}) as Profile|null;
    const invalid='Usuário ou senha inválidos.';assert(profile&&await accountEnabled(profile),invalid,401);
    const email=await getEmail(profile.id);const auth=client();const {data,error}=await auth.auth.signInWithPassword({email,password:String(body.password??'')});assert(!error&&data.session,invalid,401);
    if(profile.must_change_password&&(!profile.password_expires_at||new Date(profile.password_expires_at)<new Date())){await auth.auth.signOut();throw new HttpError(403,'A senha temporária expirou ou ainda não foi enviada. Solicite o reenvio ao administrador.');}
    return respond({session:{access_token:data.session.access_token,refresh_token:data.session.refresh_token},profile});
   }
   if(action==='auth/recover'){
-   const username=String(body.username??'').trim().toLowerCase();await authLimit(request,username,'recover',3);const profile=await findLoginProfile(admin,username,body) as Profile|null;
+   const username=String(body.username??'').trim().toLowerCase();await authLimit(request,username,'recover',3);const profile=await findLoginProfile(admin,username,{}) as Profile|null;
    if(profile&&await accountEnabled(profile)&&mailReady()){const token=secureToken(),email=await getEmail(profile.id);check(await admin.from('password_resets').insert({token_hash:await sha256(token),user_id:profile.id,expires_at:new Date(Date.now()+30*60000).toISOString()}));check(await admin.from('email_jobs').insert({user_id:profile.id,kind:'recovery',recipient:email,state:'scheduled',send_at:new Date().toISOString(),encrypted_payload:await encryptPayload({token},encryptionKey())}));}
    return respond({ok:true});
   }
@@ -124,6 +134,19 @@ Deno.serve(async request=>{
    return respond(await createAccount({...body,role:'system_admin',company_id:company.id}));
   }
   const {profile}=await actor(request,action==='auth/password');
+  if(action.startsWith('billing/')){
+   const companyId=String(body.company_id??profile.company_id);assert(isSystemAdmin(profile)||profile.role==='admin'&&profile.company_id===companyId,'Acesso exclusivo do administrador da empresa.',403);const company=await companyFor(companyId);
+   try{
+    if(action==='billing/overview')return respond(await billingOverview(admin,companyId));
+    if(action==='billing/subscribe'){assert(body.accepted===true,'Confirme as condições do plano e o compartilhamento dos dados com o Asaas.');return respond(await subscribeCompany(admin,company,profile.id,await getEmail(profile.id),String(body.plan??''),String(body.method??'')));}
+    if(action==='billing/refresh'||action==='billing/cancel'){
+     const sub=check(await admin.from('billing_subscriptions').select('*').eq('id',String(body.id??'')).eq('company_id',companyId).eq('environment',billingEnvironment()).single());assert(sub,'Assinatura não encontrada.');
+     if(action==='billing/cancel'){assert(body.confirm===true,'Confirme o cancelamento da renovação.');return respond(await cancelSubscription(admin,sub));}
+     await syncPayments(admin,sub);return respond({ok:true});
+    }
+   }catch(e){if(e instanceof HttpError)throw e;throw new HttpError(400,(e as Error).message);}
+   throw new HttpError(404,'Operação não encontrada.');
+  }
   if(action==='account/profile')return respond({profile:{...profile,email:await getEmail(profile.id)}});
   if(action==='account/update-profile'){
    let changes;try{changes=profileChanges(body);}catch(e){throw new HttpError(400,(e as Error).message);}
@@ -142,6 +165,8 @@ Deno.serve(async request=>{
   }
   if(action.startsWith('system/')){
    assert(isSystemAdmin(profile),'Acesso exclusivo do administrador do sistema.',403);
+   if(action==='system/billing-setup'){try{return respond(await setupBilling(admin,await getEmail(profile.id)));}catch(e){throw new HttpError(503,(e as Error).message);}}
+   if(action==='system/contacts'){const messages=check(await admin.from('contact_messages').select('id,name,email,category,subject,message,created_at,state').order('created_at',{ascending:false}).limit(100));return respond({messages});}
    if(action==='system/workspace')return respond(await workspaceData(String(body.company_id??profile.company_id)));
    if(action==='system/newsletter'){return respond(await newsletterOverview(admin));}
    if(action==='system/newsletter-draft'){

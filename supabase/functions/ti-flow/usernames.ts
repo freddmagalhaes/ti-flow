@@ -21,6 +21,4 @@ export function parseLoginEnvironment(input:LoginEnvironment):{scope:'system'|'c
  const company=input.company.trim().toLowerCase();
  return company.length>=2&&company.length<=64&&/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(company)?{scope:'company',company}:null;
 }
-export function accessUrl(base:string,role:string,companySlug:string){
- const url=new URL(base);if(role==='system_admin')url.searchParams.set('ambiente','sistema');else url.searchParams.set('empresa',companySlug);return url.toString();
-}
+export function accessUrl(base:string,_role:string,_companySlug:string){return new URL('/entrar',base).toString();}

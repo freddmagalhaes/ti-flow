@@ -42,9 +42,12 @@ beforeAll(async()=>{
  await user(adminA,'Admina','admin',companyA);await user(adminB,'Adminb','admin',companyB);await user(techB,'Tecnicob','technician',companyB);await user(managerA,'Gestora','manager',companyA);await user(pendingA,'Pendentea','technician',companyA,true);
  await db.exec(await readFile(new URL('../supabase/migrations/20261120114748_scope_usernames_by_environment.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261120165243_expand_workspace_profiles_and_statuses.sql',import.meta.url),'utf8'));
+ await db.exec("create schema vault;create table vault.secrets(id uuid primary key default gen_random_uuid(),name text unique,decrypted_secret text);create view vault.decrypted_secrets as select name,decrypted_secret from vault.secrets;create schema extensions;create function extensions.gen_random_bytes(n integer) returns bytea language sql as $$select decode(repeat('00',n),'hex')$$;create function vault.create_secret(value text,label text,description text) returns uuid language sql as $$insert into vault.secrets(name,decrypted_secret) values(label,value) returning id$$;");
+ await db.exec(await readFile(new URL('../supabase/migrations/20261120170126_add_public_contact_messages.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261120170531_add_company_billing.sql',import.meta.url),'utf8'));
 },30000);
 beforeEach(async()=>{await root();await db.exec('begin');});
-afterEach(async()=>{await root();await db.exec('rollback');});
+afterEach(async()=>{await db.exec('rollback;reset role');});
 afterAll(async()=>{await db?.close();});
 
 describe('Companies: migration, RLS, files and lifecycle',()=>{
@@ -144,4 +147,40 @@ describe('Scoped login constraints and updated card behavior',()=>{
   await as(system);const c=await card(pendingA,companyA,'Atividade para usuário convidado');await db.query("update activities set status='in_progress' where id=$1",[c.id]);const previous=(await db.query<{number:number;code:string}>('select number,code from activities where id=$1',[c.id])).rows[0];await db.query("update activities set title='Em validação',status='testing' where id=$1",[c.id]);expect((await db.query('select number,code from activities where id=$1',[c.id])).rows[0]).toEqual(previous);
   await as(pendingA);expect((await db.query('select * from activities where id=$1',[c.id])).rows).toHaveLength(0);
  });
+});
+
+describe('Billing integrity and public contact privacy',()=>{
+ async function reserve(company=companyA,plan='monthly'){return (await db.query<{reserve_company_subscription:{created:boolean;subscription:{id:string;amount_cents:number}}}>('select reserve_company_subscription($1,$2,$3,$4,$5)',[company,'sandbox',plan,'PIX',system])).rows[0].reserve_company_subscription;}
+ async function payment(sub:string,id:string,event:string,status='paid',amount=5990){return db.query('select record_billing_payment($1,$2,$3,$4,$5,$6,$7,$8,$9)',['sandbox',event,'PAYMENT_RECEIVED',sub,id,amount,'2026-11-20',status,'https://sandbox.asaas.com/i/test']);}
+ it('reserves prices from the server and reuses a pending subscription instead of duplicating it',async()=>{
+  const first=await reserve(),second=await reserve(),annual=await reserve(companyB,'annual');expect(first.created).toBe(true);expect(second.created).toBe(false);expect(second.subscription.id).toBe(first.subscription.id);expect(first.subscription.amount_cents).toBe(5990);expect(annual.subscription.amount_cents).toBe(59900);
+ });
+ it('deduplicates payment events, validates amount and prevents cross-company payment reassignment',async()=>{
+  const a=await reserve(),b=await reserve(companyB);await payment(a.subscription.id,'pay-a','evt-a');const repeat=await payment(a.subscription.id,'pay-a','evt-a');expect(repeat.rows[0]).toMatchObject({record_billing_payment:false});
+  await rejected('select record_billing_payment($1,$2,$3,$4,$5,$6,$7,$8,$9)',['sandbox','evt-tamper','PAYMENT_RECEIVED',a.subscription.id,'pay-tamper',1,'2026-11-20','paid',null],/Valor/);
+  await rejected('select record_billing_payment($1,$2,$3,$4,$5,$6,$7,$8,$9)',['sandbox','evt-cross','PAYMENT_RECEIVED',b.subscription.id,'pay-a',5990,'2026-11-20','paid',null],/outra assinatura/);
+ });
+ it('does not let an old overdue or paid event override settled or refunded payment state',async()=>{
+  const a=await reserve();await payment(a.subscription.id,'pay-a','evt-paid');await payment(a.subscription.id,'pay-a','evt-old','overdue');expect((await db.query<{status:string}>('select status from billing_payments')).rows[0].status).toBe('paid');await payment(a.subscription.id,'pay-a','evt-refund','refunded');await payment(a.subscription.id,'pay-a','evt-repeated-paid');expect((await db.query<{status:string}>('select status from billing_payments')).rows[0].status).toBe('refunded');
+ });
+ it('protects billing and contact tables and mutation functions from browser roles',async()=>{
+  for(const role of ['anon','authenticated']){await db.exec('set role '+role);for(const table of ['billing_plans','billing_subscriptions','billing_payments','billing_customers','billing_events','billing_integrations','contact_messages'])await rejected('select * from '+table);await rejected('select reserve_company_subscription($1,$2,$3,$4,$5)',[companyA,'sandbox','monthly','PIX',system]);await rejected('select * from claim_contact_messages()');await root();}
+ });
+ it('enforces ten active company members while exempting global administrators and inactive accounts',async()=>{
+  for(let i=0;i<6;i++)await user(id(300+i),'Vaga'+String.fromCharCode(65+i),'technician',companyA);
+  await db.query('insert into auth.users(id,email) values($1,$2)',[id(310),'over@example.invalid']);await rejected('insert into profiles(id,full_name,username,role,company_id) values($1,$2,$3,$4,$5)',[id(310),'Outra Pessoa','outra.pessoa','technician',companyA],/Limite/);
+  await db.query("insert into profiles(id,full_name,username,role,company_id,active) values($1,$2,$3,'technician',$4,false)",[id(310),'Outra Pessoa','outra.pessoa',companyA]);await rejected('update profiles set active=true where id=$1',[id(310)],/Limite/);
+  await user(id(311),'Globalextra','system_admin',companyA);
+ });
+ it('leases contact delivery and ignores stale acknowledgements',async()=>{
+  await db.query("insert into contact_messages(name,email,category,subject,message) values('Pessoa','visitor@example.invalid','commercial','Conhecer plano','Mensagem de teste local')");
+  const job=(await db.query<{id:string;claim_token:string}>('select * from claim_contact_messages()')).rows[0];expect((await db.query('select * from claim_contact_messages()')).rows).toHaveLength(0);
+  await db.query('select finish_contact_message($1,$2,true)',[job.id,system]);expect((await db.query<{state:string}>('select state from contact_messages')).rows[0].state).toBe('sending');
+  await db.query('select finish_contact_message($1,$2,true)',[job.id,job.claim_token]);expect((await db.query<{state:string}>('select state from contact_messages')).rows[0].state).toBe('sent');
+ });
+});
+
+describe('Automatic e-mail identity lookup',()=>{
+ it('resolves one account for the trusted server without a company selector',async()=>{await root();const email=(await db.query<{email:string}>('select email from auth.users where id=$1',[techA])).rows[0].email;await db.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify({role:'service_role'})]);await db.exec('set role service_role');expect((await db.query<{profile_id_for_email:string}>('select profile_id_for_email($1)',[email.toUpperCase()])).rows[0].profile_id_for_email).toBe(techA);expect((await db.query<{profile_id_for_email:null}>('select profile_id_for_email($1)',['missing@example.invalid'])).rows[0].profile_id_for_email).toBe(null);});
+ it('does not expose the Auth email lookup to anonymous or signed-in browser roles',async()=>{for(const role of ['anon','authenticated']){await db.exec('set role '+role);await rejected("select profile_id_for_email('someone@example.invalid')");await root();}});
 });

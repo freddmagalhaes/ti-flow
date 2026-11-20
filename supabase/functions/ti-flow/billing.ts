@@ -2,21 +2,30 @@ import type {SupabaseClient} from 'npm:@supabase/supabase-js@2.119.0';
 import {setting} from './settings.ts';
 export function billingEnvironment(){const value=setting('ASAAS_ENVIRONMENT');return value==='production'?'production':'sandbox';}
 export function billingConfigured(){return !!setting('ASAAS_API_KEY')&&['sandbox','production'].includes(setting('ASAAS_ENVIRONMENT')??'')&&!!setting('ASAAS_WEBHOOK_TOKEN');}
+export function asaasValidationMessage(data:unknown){
+ if(!data||typeof data!=='object'||!Array.isArray((data as {errors?:unknown}).errors))return '';
+ return (data as {errors:unknown[]}).errors.slice(0,3).map(error=>{
+  if(!error||typeof error!=='object')return '';
+  const description=(error as {description?:unknown}).description;
+  return typeof description==='string'?description.replace(/https?:\/\/\S+|\b\S+@\S+\b|\$aact_\S+|\b[A-Za-z0-9_-]{32,}\b|\b\d{8,}\b/gi,'[dado omitido]').replace(/[\r\n\t]/g,' ').slice(0,240):'';
+ }).filter(Boolean).join(' ');
+}
+export class AsaasRequestError extends Error {constructor(public status:number,message:string){super(message);this.name='AsaasRequestError';}}
 function checked<T>(result:{data:T;error:unknown}):T{if(result.error)throw new Error('Não foi possível atualizar os dados da cobrança.');return result.data;}
 export function invoiceUrl(value:unknown){if(typeof value!=='string')return null;try{const url=new URL(value);return url.protocol==='https:'&&(url.hostname==='asaas.com'||url.hostname.endsWith('.asaas.com'))?url.toString():null;}catch{return null;}}
 export function paymentStatus(status:unknown):'paid'|'pending'|'overdue'|'refunded'|'disputed'|'deleted'{
  if(['CONFIRMED','RECEIVED','RECEIVED_IN_CASH'].includes(String(status)))return 'paid';
  if(status==='OVERDUE')return 'overdue';if(status==='REFUNDED')return 'refunded';if(String(status).includes('CHARGEBACK'))return 'disputed';if(status==='DELETED')return 'deleted';return 'pending';
 }
-export function subscriptionPayload(subscription:{id:string;method:string;amount_cents:number;months:number},customer:string,base:string,day:string){
+export function subscriptionPayload(subscription:{id:string;method:string;amount_cents:number;months:number},customer:string,_base:string,day:string){
  if(!['PIX','CREDIT_CARD'].includes(subscription.method)||![1,12].includes(subscription.months)||!Number.isInteger(subscription.amount_cents)||subscription.amount_cents<=0)throw new Error('Plano inválido.');
- return {customer,billingType:subscription.method,value:subscription.amount_cents/100,cycle:subscription.months===12?'YEARLY':'MONTHLY',nextDueDate:day,description:subscription.months===12?'TI Flow · plano anual · até 10 usuários':'TI Flow · plano mensal · até 10 usuários',externalReference:subscription.id,pixAutomaticAuthorizationMode:'DISABLED',callback:{successUrl:base+'/entrar?cobranca=retorno',autoRedirect:false}};
+ return {customer,billingType:subscription.method,value:subscription.amount_cents/100,cycle:subscription.months===12?'YEARLY':'MONTHLY',nextDueDate:day,description:subscription.months===12?'TI Flow · plano anual · até 10 usuários':'TI Flow · plano mensal · até 10 usuários',externalReference:subscription.id,pixAutomaticAuthorizationMode:'DISABLED'};
 }
 export async function asaasRequest(path:string,method='GET',body?:unknown){
  if(!billingConfigured())throw new Error('Configure as credenciais do Asaas e o ambiente antes de ativar a cobrança.');
  const root=billingEnvironment()==='production'?'https://api.asaas.com/v3':'https://api-sandbox.asaas.com/v3';
  const response=await fetch(root+path,{method,headers:{access_token:setting('ASAAS_API_KEY')!,'User-Agent':'TI-Flow/1.0','Content-Type':'application/json',Accept:'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(12000)});
- const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(`O Asaas não concluiu a solicitação (HTTP ${response.status}). Confira os dados e as credenciais do ambiente.`);return data;
+ const data=await response.json().catch(()=>({}));if(!response.ok){const detail=response.status===400?asaasValidationMessage(data):'';throw new AsaasRequestError(response.status,`O Asaas não concluiu a solicitação (HTTP ${response.status}). ${detail||'Confira os dados e as credenciais do ambiente.'}`);}return data;
 }
 export async function setupBilling(db:SupabaseClient,email:string){
  const environment=billingEnvironment(),existing=checked(await db.from('billing_integrations').select('*').eq('environment',environment).maybeSingle());if(existing)return {ok:true,environment};
@@ -50,7 +59,7 @@ export async function subscribeCompany(db:SupabaseClient,company:Record<string,u
  const customer=await customerFor(db,company,email);
  const reserved=checked(await db.rpc('reserve_company_subscription',{p_company:company.id,p_environment:billingEnvironment(),p_plan:plan,p_method:method,p_actor:actorId}));let sub=reserved.subscription;
  if(sub.plan_id!==plan||sub.method!==method)throw new Error('Já existe uma assinatura nesta empresa. Consulte ou cancele a atual antes de contratar outra.');
- if(reserved.created){try{const day=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());const provider=await asaasRequest('/subscriptions','POST',subscriptionPayload(sub,customer,setting('APP_URL')!,day));if(typeof provider.id!=='string')throw new Error('Assinatura sem identificador.');sub=checked(await db.from('billing_subscriptions').update({provider_id:provider.id,state:'pending'}).eq('id',sub.id).select().single());}catch(e){await db.from('billing_subscriptions').update({state:'uncertain'}).eq('id',sub.id).is('provider_id',null);throw e;}}
+ if(reserved.created){try{const day=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());const provider=await asaasRequest('/subscriptions','POST',subscriptionPayload(sub,customer,setting('APP_URL')!,day));if(typeof provider.id!=='string')throw new Error('Assinatura sem identificador.');sub=checked(await db.from('billing_subscriptions').update({provider_id:provider.id,state:'pending'}).eq('id',sub.id).select().single());}catch(e){await db.from('billing_subscriptions').update({state:e instanceof AsaasRequestError&&[400,401,403,422].includes(e.status)?'cancelled':'uncertain'}).eq('id',sub.id).is('provider_id',null);throw e;}}
  sub=await resolveSubscription(db,sub);if(!sub.provider_id)throw new Error('A criação da assinatura aguarda conciliação. Use Atualizar para conferir antes de tentar novamente.');
  await syncPayments(db,sub);return {ok:true};
 }

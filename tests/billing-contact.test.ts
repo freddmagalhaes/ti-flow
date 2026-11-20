@@ -1,10 +1,11 @@
 import {afterEach,describe,it,expect,vi} from 'vitest';
-import {asaasRequest,billingConfigured,invoiceUrl,paymentStatus,subscriptionPayload} from '../supabase/functions/ti-flow/billing';
+import {asaasValidationMessage,asaasRequest,billingConfigured,invoiceUrl,paymentStatus,subscriptionPayload} from '../supabase/functions/ti-flow/billing';
 import {contactInput,contactContent,contactDestinations} from '../supabase/functions/ti-flow/contact';
 afterEach(()=>{vi.unstubAllGlobals();});
 describe('Asaas request boundaries',()=>{
+ it('shows validation feedback without exposing reflected identifiers or credentials',()=>{expect(asaasValidationMessage({errors:[{description:'Data de vencimento inválida para cliente 24971563792 email teste@example.com token '+ 'x'.repeat(40)}]})).toBe('Data de vencimento inválida para cliente [dado omitido] email [dado omitido] token [dado omitido]');expect(asaasValidationMessage({errors:[null,{description:123}]})).toBe('');});
  it('uses server amounts and cycles and never accepts raw card data',()=>{
-  const monthly=subscriptionPayload({id:'known-id',method:'CREDIT_CARD',amount_cents:5990,months:1},'customer-id','https://flow.automacoes.tec.br','2026-11-20');expect(monthly).toMatchObject({value:59.90,cycle:'MONTHLY',billingType:'CREDIT_CARD',externalReference:'known-id',pixAutomaticAuthorizationMode:'DISABLED'});expect(monthly).not.toHaveProperty('creditCard');
+  const monthly=subscriptionPayload({id:'known-id',method:'CREDIT_CARD',amount_cents:5990,months:1},'customer-id','https://flow.automacoes.tec.br','2026-11-20');expect(monthly).toMatchObject({value:59.90,cycle:'MONTHLY',billingType:'CREDIT_CARD',externalReference:'known-id',pixAutomaticAuthorizationMode:'DISABLED'});expect(monthly).not.toHaveProperty('creditCard');expect(monthly).not.toHaveProperty('callback');
   expect(subscriptionPayload({id:'id',method:'PIX',amount_cents:59900,months:12},'c','https://example.invalid','2026-11-20')).toMatchObject({value:599,cycle:'YEARLY'});expect(()=>subscriptionPayload({id:'id',method:'BOLETO',amount_cents:5990,months:1},'c','https://example.invalid','2026-11-20')).toThrow();
  });
  it('keeps the key on the server, uses Sandbox explicitly and sends no GET request body',async()=>{

@@ -1,10 +1,10 @@
 export type Role = 'system_admin' | 'admin' | 'manager' | 'technician';
-export type Status = 'pending' | 'in_progress' | 'third_party' | 'completed';
+export type Status = 'pending' | 'in_progress' | 'third_party' | 'testing' | 'completed';
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
 export type View = 'board' | 'dashboard' | 'archive' | 'team' | 'companies' | 'newsletter' | 'settings';
-export interface Company {id:string;name:string;slug:string;active:boolean;created_at:string}
+export interface Company {legal_name?:string;tax_id?:string;contact_email?:string;phone?:string;address?:string;website?:string;id:string;name:string;slug:string;active:boolean;created_at:string}
 export interface CompanyInput {name:string;slug:string;administrator:{full_name:string;username:string;email:string}}
-export interface Profile { id:string;company_id:string; full_name:string; username:string; role:Role; active:boolean; must_change_password:boolean; email?:string; welcome_status?:string; password_status?:string; }
+export interface Profile {phone?:string;job_title?:string;department?:string; id:string;company_id:string; full_name:string; username:string; role:Role; active:boolean; must_change_password:boolean; email?:string; welcome_status?:string; password_status?:string; }
 export interface ChecklistItem {id:string; text:string; done:boolean}
 export interface Comment {id:string; text:string; author:string; author_id:string; created_at:string}
 export interface Attachment {id:string; name:string; size:number; type:string; path:string; created_at:string}
@@ -14,11 +14,12 @@ export interface DataSet {companies:Company[];cards:Card[]; profiles:Profile[]; 
 export type CardInput = Pick<Card,'title'|'description'|'status'|'priority'|'assignee_id'|'start_date'|'due_date'>;
 export type CardPatch = Partial<CardInput & Pick<Card,'position'|'checklist'|'comments'|'attachments'>>;
 export const statuses:{id:Exclude<Status,'completed'>;label:string;hint:string;color:string}[] = [
-  {id:'pending',label:'Pendente',hint:'Prontas para começar',color:'slate'},
-  {id:'in_progress',label:'Em andamento',hint:'Foco no que está acontecendo',color:'blue'},
-  {id:'third_party',label:'Pendente de terceiros',hint:'Aguardando um retorno',color:'amber'},
+  {id:'pending',label:'A FAZER',hint:'Prontas para começar',color:'slate'},
+  {id:'in_progress',label:'EM DESENVOLVIMENTO',hint:'Foco no que está acontecendo',color:'blue'},
+  {id:'third_party',label:'AGUARDANDO',hint:'Aguardando um retorno',color:'amber'},
+  {id:'testing',label:'EM TESTE',hint:'Validando a entrega',color:'purple'},
 ];
-export const statusLabel:Record<Status,string> = {pending:'Pendente',in_progress:'Em andamento',third_party:'Pendente de terceiros',completed:'Concluído'};
+export const statusLabel:Record<Status,string> = {pending:'A FAZER',in_progress:'EM DESENVOLVIMENTO',third_party:'AGUARDANDO',testing:'EM TESTE',completed:'Concluído'};
 export const priorityLabel:Record<Priority,string> = {low:'Baixa',medium:'Média',high:'Alta',urgent:'Urgente'};
 export const roleLabel:Record<Role,string> = {system_admin:'Administrador do sistema',admin:'Administrador da empresa',manager:'Gestor',technician:'Técnico'};
 export const priorities:Priority[] = ['urgent','high','medium','low'];
@@ -67,3 +68,6 @@ export function makeDemo():DataSet {
  });
  return {companies,profiles,cards,events:cards.map(c=>({company_id:c.company_id,id:crypto.randomUUID(),activity_id:c.id,actor_id:'demo-admin',actor_name:'Alex Oliveira',action:'Atividade criada',created_at:c.created_at}))};
 }
+
+export function editableCardInput(c:CardInput):CardInput {return {title:c.title,description:c.description,status:c.status,priority:c.priority,assignee_id:c.assignee_id,start_date:c.start_date,due_date:c.due_date};}
+export function editableCardPatch(patch:CardPatch):CardPatch {const allowed=['title','description','status','priority','assignee_id','start_date','due_date','position','checklist','comments','attachments'];return Object.fromEntries(Object.entries(patch).filter(([key])=>allowed.includes(key))) as CardPatch;}

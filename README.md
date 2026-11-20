@@ -8,7 +8,7 @@ Aplicação em React, TypeScript e Supabase para a equipe Automações TI.
 - **Administrador da empresa:** gerencia somente a própria equipe e suas atividades. Não pode conceder acesso de administrador do sistema.
 - **Gestor e técnico:** mantêm as regras anteriores dentro da própria empresa.
 - Atividades, perfis, histórico, auditoria e arquivos privados são isolados por empresa no banco. Reaberturas e vínculos preservam a empresa de origem.
-- O login continua no formato `nome.sobrenome`, único em todo o sistema. As senhas e os dois e-mails de acesso seguem as regras existentes.
+- O login continua no formato `nome.sobrenome`, único em cada empresa; administradores do sistema têm um ambiente próprio. As senhas e os dois e-mails de acesso seguem as regras existentes.
 - A migração preserva os dados atuais na empresa **Automações TI** e promove o administrador inicial a **Administrador do sistema**.
 - Use **Empresas → Nova empresa** para informar os dados da empresa e do primeiro administrador. Use **Abrir empresa** ou o seletor lateral para acessar o quadro e a equipe de cada ambiente.
 
@@ -24,7 +24,7 @@ Em novas instalações, aplique `supabase/multi-company.sql` uma única vez depo
 - O Cron existente processa as mensagens após os e-mails transacionais. Reservas, limite de tentativas e chave de idempotência protegem contra reenvios; o painel mostra fila, aceitação pelo Resend, falhas e cancelamentos. Aceitação pelo provedor não significa entrega na caixa de entrada.
 - As tabelas de assinantes, edições e fila têm RLS e são exclusivas do servidor. O navegador e os administradores das empresas não podem listar assinantes ou chamar suas funções SQL.
 - Instalação: aplicar supabase/newsletter.sql depois de multi-company.sql; publicar newsletter.ts junto aos outros arquivos da Edge Function. Em produção, aplicar a migração antes da função e do frontend. Nenhuma alteração DNS adicional é necessária quando o domínio de envio já está verificado.
-- O cadastro de usuários mostra a empresa e apenas perfis da empresa. Falhas do servidor aparecem no formulário, preservando os dados para correção. O login permanece único globalmente.
+- O cadastro de usuários mostra a empresa e apenas perfis da empresa. Falhas do servidor aparecem no formulário, preservando os dados para correção. O login pode se repetir entre empresas e na administração do sistema; a unicidade é validada no ambiente selecionado.
 
 ## Publicar na Vercel
 
@@ -160,3 +160,15 @@ Executar os testes e a compilação, sincronizar a fonte pelo helper do Sites e 
 - Ferramentas de desenvolvimento: há aviso transitivo do `picomatch` sem versão corrigida publicada na consulta realizada. Os padrões de compilação e testes são controlados pelo projeto; essas ferramentas não são publicadas como servidor de produção.
 
 O projeto hospedado já passou pela verificação inicial: 6 tabelas com RLS, bucket privado, políticas de arquivos, função publicada e bloqueio das rotas administrativas sem sessão. O advisor retornou somente três avisos informativos de [RLS sem política pública](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy), intencionais nas tabelas exclusivas do servidor. Após ativar o provedor, repetir a validação com os três perfis reais, Storage, Realtime, primeiro acesso, recuperação e os dois e-mails. O primeiro acesso do administrador do sistema e os dois e-mails transacionais já foram validados em produção. A validação pública do servidor já confirmou bloqueio de acesso anônimo, administração sem sessão, processador sem segredo, origens externas e configuração privada.
+
+## Atualização de ambientes e cadastros
+
+Aplicar, após multi-company.sql, as migrações geradas em supabase/migrations/20261120114748_scope_usernames_by_environment.sql e 20261120165243_expand_workspace_profiles_and_statuses.sql. Publicar todos os arquivos TypeScript da função ti-flow.
+
+O login agora informa ambiente e identificador da empresa. Links de acesso: /?empresa=sistema-plus ou /?ambiente=sistema para administradores globais. Clientes antigos só são reconhecidos sem ambiente quando o login não é ambíguo. A recuperação de senha usa o mesmo ambiente. E-mails novos incluem empresa e link correto.
+
+O administrador do sistema carrega cada ambiente pelo servidor com sessão validada. Pode criar e editar cards, atribuir a qualquer usuário ativo da empresa (incluindo convidados), gerenciar perfis e editar os dados cadastrais das empresas. Usuários convidados só entram após trocar a senha.
+
+Os quadros são A FAZER, EM DESENVOLVIMENTO, AGUARDANDO e EM TESTE; os registros anteriores preservam seus estados. A edição envia apenas os campos permitidos, sem number/code/IDs. O formulário é fechado após criar e uma nova abertura começa limpa.
+
+O avatar abre o perfil pessoal (nome, telefone, cargo e departamento). E-mail de acesso e login permanecem protegidos, inclusive por trigger no Auth para impedir alteração do e-mail diretamente pela API. Dados da empresa ficam disponíveis pelo menu lateral; gestores e administradores podem editá-los na própria empresa.

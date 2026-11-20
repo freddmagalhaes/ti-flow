@@ -20,7 +20,7 @@ async function rejected(sql:string,params:unknown[]=[],pattern?:RegExp){await db
 beforeAll(async()=>{
  db=new PGlite();
  await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create schema auth;
- create table auth.users(id uuid primary key,email text,encrypted_password text);create table auth.sessions(id uuid primary key,user_id uuid references auth.users(id));
+ create table auth.users(id uuid primary key,email text,email_change text default '',encrypted_password text);create table auth.sessions(id uuid primary key,user_id uuid references auth.users(id));
  create function auth.uid() returns uuid language sql stable as $$select (nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'sub')::uuid$$;
  create function auth.jwt() returns jsonb language sql stable as $$select coalesce(nullif(current_setting('request.jwt.claims',true),'')::jsonb,'{}'::jsonb)$$;
  grant usage on schema public,auth to anon,authenticated,service_role;grant execute on function auth.uid(),auth.jwt() to anon,authenticated,service_role;
@@ -40,6 +40,8 @@ beforeAll(async()=>{
  companyA=(await db.query<{id:string}>("select id from companies where slug='automacoes-ti'")).rows[0].id;
  companyB=(await db.query<{id:string}>("insert into companies(name,slug) values('Empresa B','empresa-b') returning id")).rows[0].id;
  await user(adminA,'Admina','admin',companyA);await user(adminB,'Adminb','admin',companyB);await user(techB,'Tecnicob','technician',companyB);await user(managerA,'Gestora','manager',companyA);await user(pendingA,'Pendentea','technician',companyA,true);
+ await db.exec(await readFile(new URL('../supabase/migrations/20261120114748_scope_usernames_by_environment.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261120165243_expand_workspace_profiles_and_statuses.sql',import.meta.url),'utf8'));
 },30000);
 beforeEach(async()=>{await root();await db.exec('begin');});
 afterEach(async()=>{await root();await db.exec('rollback');});
@@ -125,4 +127,21 @@ describe('Administrative API authorization predicates',()=>{
  it('restricts company administrators to their own company and protects platform accounts',()=>{expect(canAdminCompany(a,'a')).toBe(true);expect(canAdminCompany(a,'b')).toBe(false);expect(canAdminAccount(a,b)).toBe(false);expect(canAdminAccount(a,sys)).toBe(false);expect(canAdminAccount(a,tech)).toBe(true);expect(canAdminCompany(tech,'a')).toBe(false);});
  it('allows full system management and prevents company administrators from granting it',()=>{expect(canAdminAccount(sys,b)).toBe(true);expect(canAdminCompany(sys,'b')).toBe(true);expect(canAssignRole(a,'system_admin')).toBe(false);expect(canAssignRole(sys,'system_admin')).toBe(false);expect(canAssignRole(a,'admin')).toBe(true);expect(canAssignRole(sys,'unknown')).toBe(false);});
  it('validates company identifiers before provisioning',()=>{expect(validCompany('Empresa A','empresa-a')).toBe(true);expect(validCompany('A','a')).toBe(false);expect(validCompany('Empresa','outra/empresa')).toBe(false);});
+});
+
+describe('Scoped login constraints and updated card behavior',()=>{
+ it('allows the same login in separate companies and in system administration but rejects repeats inside one namespace',async()=>{
+  await user(id(90),'Pessoa','technician',companyA);await user(id(91),'Outra','admin',companyB);
+  await db.query('update profiles set username=$1 where id in($2,$3)',['frederico.magalhaes',id(90),id(91)]);
+  expect((await db.query('select * from profiles where username=$1',['frederico.magalhaes'])).rows).toHaveLength(3);
+  await rejected('update profiles set username=$1 where id=$2',['frederico.magalhaes',techA],/unique|duplicate/);
+  await user(id(92),'Novo','system_admin',companyB);await rejected('update profiles set username=$1 where id=$2',['frederico.magalhaes',id(92)],/unique|duplicate/);
+ });
+ it('accepts numeric login suffixes and keeps email protected even through Auth updates',async()=>{
+  await db.query('update profiles set username=$1 where id=$2',['tecnico.nome482',techA]);await rejected('update auth.users set email=$1 where id=$2',['other@example.invalid',techA],/e-mail/);await rejected('update auth.users set email_change=$1 where id=$2',['other@example.invalid',techA],/e-mail/);
+ });
+ it('lets system administrators assign invited company members and edit development/testing cards without changing identity',async()=>{
+  await as(system);const c=await card(pendingA,companyA,'Atividade para usuário convidado');await db.query("update activities set status='in_progress' where id=$1",[c.id]);const previous=(await db.query<{number:number;code:string}>('select number,code from activities where id=$1',[c.id])).rows[0];await db.query("update activities set title='Em validação',status='testing' where id=$1",[c.id]);expect((await db.query('select number,code from activities where id=$1',[c.id])).rows[0]).toEqual(previous);
+  await as(pendingA);expect((await db.query('select * from activities where id=$1',[c.id])).rows).toHaveLength(0);
+ });
 });

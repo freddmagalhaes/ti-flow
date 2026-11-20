@@ -2,6 +2,18 @@
 
 Aplicação em React, TypeScript e Supabase para a equipe Automações TI.
 
+## Empresas e níveis de administração
+
+- **Administrador do sistema:** cadastra empresas com seu primeiro administrador, alterna entre ambientes e gerencia os acessos de todas as empresas.
+- **Administrador da empresa:** gerencia somente a própria equipe e suas atividades. Não pode conceder acesso de administrador do sistema.
+- **Gestor e técnico:** mantêm as regras anteriores dentro da própria empresa.
+- Atividades, perfis, histórico, auditoria e arquivos privados são isolados por empresa no banco. Reaberturas e vínculos preservam a empresa de origem.
+- O login continua no formato `nome.sobrenome`, único em todo o sistema. As senhas e os dois e-mails de acesso seguem as regras existentes.
+- A migração preserva os dados atuais na empresa **Automações TI** e promove o administrador inicial a **Administrador do sistema**.
+- Use **Empresas → Nova empresa** para informar os dados da empresa e do primeiro administrador. Use **Abrir empresa** ou o seletor lateral para acessar o quadro e a equipe de cada ambiente.
+
+Em novas instalações, aplique `supabase/multi-company.sql` uma única vez depois de `schema.sql` e `storage-and-realtime.sql`. Publique `permissions.ts` junto aos demais arquivos da função. Em produção, aplique a migração versionada antes de atualizar a função e o frontend. Os testes de isolamento usam duas empresas locais, sem enviar e-mails reais.
+
 ## Publicar na Vercel
 
 1. Importe o repositório `freddmagalhaes/ti-flow` e selecione a branch `main`, usando a raiz do repositório.
@@ -129,7 +141,7 @@ Executar os testes e a compilação, sincronizar a fonte pelo helper do Sites e 
 
 ## Validação
 
-- 34 testes automatizados: política de senhas, criptografia, permissões, sessão revogada, bloqueio inicial, privilégios, comentários, imutabilidade, reabertura e fila dos e-mails.
+- 50 testes automatizados: política de senhas, criptografia, permissões, sessão revogada, bloqueio inicial, privilégios, comentários, imutabilidade, reabertura, fila dos e-mails e isolamento entre empresas, inclusive arquivos e administração.
 - Compilação TypeScript/Vite e verificação Deno das funções.
 - Fluxos pela interface: criação, checklist, comentários, conclusão, consulta e reabertura; movimentação por teclado.
 - Dependências de produção: auditoria npm sem vulnerabilidades conhecidas no momento da entrega.

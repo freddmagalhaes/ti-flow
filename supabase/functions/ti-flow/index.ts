@@ -64,7 +64,7 @@ async function createAccount(body:Record<string,unknown>) {
 }
 async function workspaceData(companyId:string){
  await companyFor(companyId);
- async function rows(table:string,order:string,scoped=true){const result:Record<string,unknown>[]=[];for(let offset=0;;offset+=1000){let query=admin.from(table).select('*').order(order).range(offset,offset+999);if(scoped)query=query.eq('company_id',companyId);const page=check(await query)??[];result.push(...page);if(page.length<1000)return result;}}
+ async function rows(table:string,order:string,scoped=true){const result:Record<string,unknown>[]=[];for(let offset=0;;offset+=1000){let query=admin.from(table).select('*').order(order).range(offset,offset+999);if(scoped)query=query.eq('company_id',companyId);if(table==='activities')query=query.is('deleted_at',null);const page=check(await query)??[];result.push(...page);if(page.length<1000)return result;}}
  const [cards,profiles,events,companies]=await Promise.all([rows('activities','position'),rows('profiles','full_name'),rows('audit_events','created_at'),rows('companies','name',false)]);
  for(const p of profiles)p.email=await getEmail(String(p.id));
  return {cards,profiles,events,companies};

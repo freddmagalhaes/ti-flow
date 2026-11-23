@@ -194,3 +194,7 @@ Configurar ASAAS_API_KEY e ASAAS_ENVIRONMENT=sandbox nos Secrets da função; a 
 A assinatura usa a Fatura do Asaas: dados de cartão não são capturados pelo Flow. Pix gera faturas para pagamento em cada renovação, com Pix Automático desabilitado; cartão utiliza recorrência no Asaas após o cadastro do cartão na fatura. O webhook consulta o estado financeiro no provedor e processa cada evento de forma idempotente; retorno do navegador não é confirmação de pagamento. Eventos antigos de atraso não substituem pagamento recebido, nem eventos pagos antigos substituem estornos. Falha ambígua na criação exige conciliação antes de uma nova assinatura. Cancelar a renovação não solicita estorno.
 
 Aplicar em ordem as migrações add_public_contact_messages e add_company_billing depois das migrações de ambientes e perfis. Publicar todos os arquivos .ts da função ti-flow. Homologar em Sandbox antes de ativar produção; os ambientes e suas faturas ficam separados.
+
+## Exclusão de atividades não finalizadas
+
+O botão Excluir fica no card e pede confirmação. Usa as mesmas permissões de edição: administrador do sistema nas empresas selecionadas, administrador/gestor da própria empresa e técnico responsável pelo card. A exclusão lógica registra autor e data, preserva auditoria e vínculos de reabertura e remove o card das consultas de trabalho. Concluídos permanecem imutáveis. A RPC verifica a versão para impedir exclusão concorrente de uma atividade alterada ou finalizada. Aplicar a migração allow_unfinished_activity_deletion antes de atualizar a função e o frontend.

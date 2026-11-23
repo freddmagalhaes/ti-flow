@@ -45,10 +45,42 @@ beforeAll(async()=>{
  await db.exec("create schema vault;create table vault.secrets(id uuid primary key default gen_random_uuid(),name text unique,decrypted_secret text);create view vault.decrypted_secrets as select name,decrypted_secret from vault.secrets;create schema extensions;create function extensions.gen_random_bytes(n integer) returns bytea language sql as $$select decode(repeat('00',n),'hex')$$;create function vault.create_secret(value text,label text,description text) returns uuid language sql as $$insert into vault.secrets(name,decrypted_secret) values(label,value) returning id$$;");
  await db.exec(await readFile(new URL('../supabase/migrations/20261120170126_add_public_contact_messages.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261120170531_add_company_billing.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261123125328_allow_unfinished_activity_deletion.sql',import.meta.url),'utf8'));
 },30000);
 beforeEach(async()=>{await root();await db.exec('begin');});
 afterEach(async()=>{await db.exec('rollback;reset role');});
 afterAll(async()=>{await db?.close();});
+
+describe('Deletion of unfinished activities',()=>{
+ it.each(['pending','in_progress','third_party','testing'])('removes %s from work queries while preserving its audit and identity',async status=>{
+  await as(adminA);const c=await card(techA,companyA);const updated=(await db.query<{version:number}>('update activities set status=$1 where id=$2 returning version',[status,c.id])).rows[0];
+  await db.query('select delete_activity($1,$2)',[c.id,updated.version]);
+  expect((await db.query('select id from activities where id=$1 and deleted_at is null',[c.id])).rows).toHaveLength(0);
+  expect((await db.query<{deleted_by:string;version:number}>('select deleted_by,version from activities where id=$1',[c.id])).rows[0]).toMatchObject({deleted_by:adminA,version:updated.version+1});
+  expect((await db.query<{action:string}>('select action from audit_events where activity_id=$1',[c.id])).rows.map(x=>x.action)).toContain('Atividade excluída');
+  await rejected('update activities set deleted_at=null,deleted_by=null where id=$1',[c.id],/excluída/);
+ });
+ it('rejects completed cards, stale versions, strangers and technicians deleting work of another person',async()=>{
+  await as(adminA);const c=await card(techA,companyA);await rejected('select delete_activity($1,999)',[c.id]);
+  await as(techB);await rejected('select delete_activity($1,1)',[c.id]);
+  await as(pendingA);await rejected('select delete_activity($1,1)',[c.id]);
+  await as(adminA);const other=await card(adminA,companyA);await as(techA);await rejected('select delete_activity($1,1)',[other.id]);
+  await db.query('select delete_activity($1,1)',[c.id]);
+  await as(adminA);await db.query('select complete_activity($1,1)',[other.id]);await rejected('select delete_activity($1,2)',[other.id]);
+ });
+ it('lets system administrators act across companies and managers act only inside their company',async()=>{
+  await as(adminB);const b=await card(techB,companyB);await as(managerA);await rejected('select delete_activity($1,1)',[b.id]);
+  const a=await card(techA,companyA);await db.query('select delete_activity($1,1)',[a.id]);await as(system);await db.query('select delete_activity($1,1)',[b.id]);
+ });
+ it('preserves reopening links and permits a new continuation after an accidental open card is deleted',async()=>{
+  await as(adminA);const source=await card(techA,companyA);await db.query('select complete_activity($1,1)',[source.id]);
+  const opened=(await db.query<{id:string;parent_id:string;root_id:string}>("select * from reopen_activity($1,'Aberto por engano',current_date,current_date,$2)",[source.id,techA])).rows[0];
+  await db.query('select delete_activity($1,1)',[opened.id]);
+  const replacement=(await db.query<{id:string;parent_id:string;root_id:string}>("select * from reopen_activity($1,'Retomada correta',current_date,current_date,$2)",[source.id,techA])).rows[0];
+  expect(replacement.id).not.toBe(opened.id);expect(replacement.parent_id).toBe(source.id);expect(replacement.root_id).toBe(source.id);
+  expect((await db.query<{parent_id:string}>('select parent_id from activities where id=$1',[opened.id])).rows[0].parent_id).toBe(source.id);
+ });
+});
 
 describe('Companies: migration, RLS, files and lifecycle',()=>{
  it('preserves archived records and promotes the existing owner to system administrator',async()=>{

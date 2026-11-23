@@ -198,3 +198,9 @@ Aplicar em ordem as migrações add_public_contact_messages e add_company_billin
 ## Exclusão de atividades não finalizadas
 
 O botão Excluir fica no card e pede confirmação. Usa as mesmas permissões de edição: administrador do sistema nas empresas selecionadas, administrador/gestor da própria empresa e técnico responsável pelo card. A exclusão lógica registra autor e data, preserva auditoria e vínculos de reabertura e remove o card das consultas de trabalho. Concluídos permanecem imutáveis. A RPC verifica a versão para impedir exclusão concorrente de uma atividade alterada ou finalizada. Aplicar a migração allow_unfinished_activity_deletion antes de atualizar a função e o frontend.
+
+## E-mails de atividades
+
+Migração activity_email_notifications e módulo activity-emails.ts: aviso de criação/reatribuição, lembrete no dia útil anterior, primeiro vencimento no próximo dia útil e resumo diário posterior por responsável/empresa. Dias úteis: segunda a sexta, sem calendário de feriados. Prazos contam todo o dia no fuso da empresa; padrão America/Sao_Paulo, alertas a partir das 9h até as 18h. Preferências pessoais e da empresa ficam em Configurações. Os avisos de atribuição são processados mesmo fora do horário comercial.
+
+A fila privada usa chave única por evento/prazo/pessoa/período, lease, retentativas limitadas e chave de idempotência do Resend. O worker já agendado a cada 30 segundos processa a fila, revalidando responsável, datas, conta ativa, empresa ativa e preferências antes de enviar. Conclusão/exclusão impede os próximos avisos; mudanças de prazo invalidam lembretes antigos. Avisos de atividades usam MAIL_FROM e RESEND_API_KEY; não modificam os e-mails de acesso e recuperação. O link abre o card após autenticar. Guia público: /blog/notificacoes-de-atividades.

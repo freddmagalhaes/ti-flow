@@ -46,10 +46,59 @@ beforeAll(async()=>{
  await db.exec(await readFile(new URL('../supabase/migrations/20261120170126_add_public_contact_messages.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261120170531_add_company_billing.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261123125328_allow_unfinished_activity_deletion.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261123132026_activity_email_notifications.sql',import.meta.url),'utf8'));
 },30000);
 beforeEach(async()=>{await root();await db.exec('begin');});
 afterEach(async()=>{await db.exec('rollback;reset role');});
 afterAll(async()=>{await db?.close();});
+
+describe('Activity notification queue',()=>{
+ it('notifies creation and reassignment once and cancels the old recipient',async()=>{
+  await as(adminA);const c=await card(techA,companyA);await db.query("update activities set title='Nova descrição do título' where id=$1",[c.id]);
+  await root();expect((await db.query('select id from activity_email_jobs')).rows).toHaveLength(1);
+  await as(adminA);await db.query('update activities set assignee_id=$1 where id=$2',[adminA,c.id]);await root();
+  expect((await db.query<{state:string;recipient_id:string}>("select state,recipient_id from activity_email_jobs order by recipient_id")).rows).toEqual(expect.arrayContaining([{state:'cancelled',recipient_id:techA},{state:'scheduled',recipient_id:adminA}]));
+  expect((await db.query("select has_table_privilege('authenticated','activity_email_jobs','select') as allowed")).rows[0]).toMatchObject({allowed:false});
+ });
+ it('schedules Friday warnings for Monday deadlines, respects business hours and prevents duplicate reminders',async()=>{
+  await as(adminA);const c=await card(techA,companyA);await db.query("update activities set due_date='2026-11-30' where id=$1",[c.id]);await root();
+  await db.query("select private.schedule_activity_emails('2026-11-27 11:00:00+00')");expect((await db.query("select * from activity_email_jobs where kind='due_soon'")).rows).toHaveLength(0);
+  await db.query("select private.schedule_activity_emails('2026-11-27 12:00:00+00')");await db.query("select private.schedule_activity_emails('2026-11-27 13:00:00+00')");
+  expect((await db.query("select * from activity_email_jobs where kind='due_soon'")).rows).toHaveLength(1);
+  await db.query("select private.schedule_activity_emails('2026-12-01 12:00:00+00')");expect((await db.query("select * from activity_email_jobs where kind='overdue'")).rows).toHaveLength(1);
+ });
+ it('groups late activities into one daily summary per responsible person and company',async()=>{
+  await as(adminA);const a=await card(techA,companyA),b=await card(techA,companyA);await db.query("update activities set due_date='2026-11-30' where id=any($1)",[[a.id,b.id]]);await root();
+  await db.query("select private.schedule_activity_emails('2026-12-02 12:00:00+00')");await db.query("select private.schedule_activity_emails('2026-12-02 14:00:00+00')");
+  const jobs=(await db.query<{items:unknown[]}>("select items from activity_email_jobs where kind='overdue_digest'")).rows;expect(jobs).toHaveLength(1);expect(jobs[0].items).toHaveLength(2);
+ });
+ it('reschedules changed deadlines without reusing the old reminder and respects opted-out recipients',async()=>{
+  await as(adminA);const c=await card(techA,companyA);await db.query("update activities set due_date='2026-11-30' where id=$1",[c.id]);await root();await db.query("select private.schedule_activity_emails('2026-11-27 12:00:00+00')");
+  await as(adminA);await db.query("update activities set due_date='2026-12-01' where id=$1",[c.id]);await root();await db.query("select private.schedule_activity_emails('2026-11-30 12:00:00+00')");
+  expect((await db.query("select * from activity_email_jobs where kind='due_soon'")).rows).toHaveLength(2);
+  await db.query('update profiles set activity_emails_enabled=false where id=$1',[techA]);await as(adminA);await card(techA,companyA);await root();
+  expect((await db.query("select * from activity_email_jobs where kind='assigned'")).rows).toHaveLength(1);
+ });
+ it('leases jobs once and rejects stale completion tokens and public queue access',async()=>{
+  await as(adminA);await card(techA,companyA);await root();const jobs=(await db.query<{id:string;claim_token:string}>('select * from claim_activity_emails()')).rows;expect(jobs).toHaveLength(1);
+  expect((await db.query('select * from claim_activity_emails()')).rows).toHaveLength(0);
+  await db.query("select finish_activity_email($1,gen_random_uuid(),'sent')",[jobs[0].id]);expect((await db.query('select state from activity_email_jobs where id=$1',[jobs[0].id])).rows[0]).toMatchObject({state:'sending'});
+  for(const role of ['anon','authenticated'])expect((await db.query("select has_function_privilege($1,'public.claim_activity_emails()','execute') as allowed",[role])).rows[0]).toMatchObject({allowed:false});
+ });
+ it('cancels pending notices after completion or reassignment and keeps foreign recipients out',async()=>{
+  await as(adminA);const c=await card(techA,companyA);await root();const j=(await db.query<{id:string;claim_token:string}>('select * from claim_activity_emails()')).rows[0];await as(adminA);await db.query('select complete_activity($1,1)',[c.id]);await root();
+  expect((await db.query<{context:{cards:unknown[]|null}}>('select activity_email_context($1,$2) as context',[j.id,j.claim_token])).rows[0].context.cards).toBeNull();
+  await as(adminA);const other=await card(techA,companyA);await root();const k=(await db.query<{id:string;claim_token:string}>('select * from claim_activity_emails()')).rows[0];await as(adminA);await db.query('update activities set assignee_id=$1 where id=$2',[adminA,other.id]);await root();
+  expect((await db.query('select activity_email_context($1,$2) as context',[k.id,k.claim_token])).rows[0]).toMatchObject({context:null});
+ });
+ it('revalidates completed, deleted, reassigned and opted-out cards before delivery',async()=>{
+  await as(adminA);const c=await card(techA,companyA);await root();const job=(await db.query<{id:string;claim_token:string}>('select * from claim_activity_emails()')).rows.find(j=>!!j.claim_token)!;
+  expect((await db.query<{context:{cards:unknown[]}}>('select activity_email_context($1,$2) as context',[job.id,job.claim_token])).rows[0].context.cards).toHaveLength(1);
+  await as(adminA);await db.query('select delete_activity($1,1)',[c.id]);await root();expect((await db.query<{context:{cards:unknown[]|null}}>('select activity_email_context($1,$2) as context',[job.id,job.claim_token])).rows[0].context.cards).toBeNull();
+  await db.query('update profiles set activity_emails_enabled=false where id=$1',[techA]);expect((await db.query('select activity_email_context($1,$2) as context',[job.id,job.claim_token])).rows[0]).toMatchObject({context:null});
+  await rejected('select finish_activity_email($1,$2,$3)',[job.id,job.claim_token,'unsafe']);
+ });
+});
 
 describe('Deletion of unfinished activities',()=>{
  it.each(['pending','in_progress','third_party','testing'])('removes %s from work queries while preserving its audit and identity',async status=>{

@@ -1,3 +1,4 @@
+import {notificationSettings,processActivityEmails} from './activity-emails.ts';
 import {billingOverview,setupBilling,subscribeCompany,syncPayments,cancelSubscription,billingWebhook,billingEnvironment} from './billing.ts';
 import {contactInput,processContactMessages} from './contact.ts';
 import {profileChanges,companyChanges} from './profile-data.ts';
@@ -24,7 +25,7 @@ const client=()=>createClient(url,publicKey,{auth:{persistSession:false,autoRefr
 class HttpError extends Error {constructor(public status:number,message:string,public details:Record<string,unknown>={}){super(message);}}
 function check<T extends {data:unknown;error:unknown}>(value:T):T['data'] {if(value.error){const accountMessage=accountUpdateErrorMessage(value.error);throw new HttpError(accountMessage?409:400,accountMessage??'Não foi possível concluir a operação. Verifique os dados e tente novamente.');}return value.data;}
 function assert(condition:unknown,message:string,status=400):asserts condition {if(!condition)throw new HttpError(status,message);}
-type Profile={id:string;company_id:string;full_name:string;username:string;role:string;active:boolean;must_change_password:boolean;password_expires_at:string|null;welcome_status:string;password_status:string};
+type Profile={activity_emails_enabled:boolean;id:string;company_id:string;full_name:string;username:string;role:string;active:boolean;must_change_password:boolean;password_expires_at:string|null;welcome_status:string;password_status:string};
 async function profileFor(id:string):Promise<Profile> {const {data}=await admin.from('profiles').select('*').eq('id',id).maybeSingle();assert(data,'Usuário não autorizado.',403);return data;}
 async function companyFor(id:string){const {data,error}=await admin.from('companies').select('*').eq('id',id).maybeSingle();assert(!error&&data,'Empresa indisponível.',403);return data;}
 async function accountEnabled(profile:Profile){return profile.active&&(isSystemAdmin(profile)||(await companyFor(profile.company_id)).active);}
@@ -87,7 +88,7 @@ Deno.serve(async request=>{
   if(origin)assert(origin===allowedOrigin,'Origem não autorizada.',403);
   const action=new URL(request.url).pathname.split('/ti-flow/')[1]??'';
   if(action==='health')return respond({smtp_ready:mailReady(),connected:true});
-  if(action==='worker/send-emails'){const supplied=request.headers.get('X-Worker-Secret'),expected=setting('EMAIL_WORKER_SECRET');assert(expected&&supplied&&await sha256(supplied)===await sha256(expected),'Não autorizado.',401);if(!mailReady())return respond({sent:0,pending_configuration:true});const transactional=await processEmails();return respond({...transactional,newsletter:await processNewsletter(admin),contact:await processContactMessages(admin)});}
+  if(action==='worker/send-emails'){const supplied=request.headers.get('X-Worker-Secret'),expected=setting('EMAIL_WORKER_SECRET');assert(expected&&supplied&&await sha256(supplied)===await sha256(expected),'Não autorizado.',401);if(!mailReady())return respond({sent:0,pending_configuration:true});const transactional=await processEmails();return respond({...transactional,activities:await processActivityEmails(admin),newsletter:await processNewsletter(admin),contact:await processContactMessages(admin)});}
   const raw=await request.text();assert(raw.length<(action==='billing/webhook'?100000:25000),'Solicitação muito grande.',413);const body=JSON.parse(raw||'{}');
   if(action==='billing/webhook'){
    const supplied=request.headers.get('asaas-access-token'),expected=setting('ASAAS_WEBHOOK_TOKEN');assert(expected&&supplied&&await sha256(supplied)===await sha256(expected),'Não autorizado.',401);const receivedEnvironment=new URL(request.url).searchParams.get('environment');if(receivedEnvironment&&receivedEnvironment!==billingEnvironment())return respond({received:true,ignored_environment:true});return respond(await billingWebhook(admin,body));
@@ -146,6 +147,15 @@ Deno.serve(async request=>{
     }
    }catch(e){if(e instanceof HttpError)throw e;throw new HttpError(400,(e as Error).message);}
    throw new HttpError(404,'Operação não encontrada.');
+  }
+  if(action==='notifications/preferences'||action==='notifications/save'){
+   const companyId=String(body.company_id??profile.company_id);assert(isSystemAdmin(profile)||companyId===profile.company_id,'Empresa indisponível.',403);const company=await companyFor(companyId);
+   if(action==='notifications/save'){
+    assert(typeof body.personal==='boolean','Preferência inválida.');
+    if(body.company!==undefined){assert(isSystemAdmin(profile)||['admin','manager'].includes(profile.role),'Somente gestores ou administradores podem configurar a empresa.',403);let changes;try{changes=notificationSettings(body.company);}catch(e){throw new HttpError(400,(e as Error).message);}check(await admin.from('companies').update(changes).eq('id',companyId));}
+    check(await admin.from('profiles').update({activity_emails_enabled:body.personal}).eq('id',profile.id));return respond({ok:true});
+   }
+   return respond({personal:profile.activity_emails_enabled,company:{activity_emails_enabled:company.activity_emails_enabled,notification_timezone:company.notification_timezone,notification_hour:company.notification_hour}});
   }
   if(action==='account/profile')return respond({profile:{...profile,email:await getEmail(profile.id)}});
   if(action==='account/update-profile'){

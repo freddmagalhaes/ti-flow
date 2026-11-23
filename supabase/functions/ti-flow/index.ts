@@ -8,7 +8,7 @@ import {createClient} from 'npm:@supabase/supabase-js@2.119.0';
 import {validPassword,temporaryPassword,sha256,secureToken,encryptPayload,decryptPayload} from './policy.ts';
 import {mailReady,emailContent,sendEmail} from './mail.ts';
 import {setting,configureRuntime} from './settings.ts';
-import {isSystemAdmin,canAdminCompany,canAdminAccount,canAssignRole,validCompany} from './permissions.ts';
+import {accountUpdateErrorMessage,isSystemAdmin,canAdminCompany,canAdminAccount,canAssignRole,validCompany} from './permissions.ts';
 const url=Deno.env.get('SUPABASE_URL')!;
 const serverKey=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const publicKey=Deno.env.get('SUPABASE_ANON_KEY')!;
@@ -22,7 +22,7 @@ async function loadRuntimeConfig(){
 const encryptionKey=()=>setting('MAIL_ENCRYPTION_KEY')!;
 const client=()=>createClient(url,publicKey,{auth:{persistSession:false,autoRefreshToken:false}});
 class HttpError extends Error {constructor(public status:number,message:string,public details:Record<string,unknown>={}){super(message);}}
-function check<T extends {data:unknown;error:unknown}>(value:T):T['data'] {if(value.error)throw new HttpError(400,'Não foi possível concluir a operação. Verifique os dados e tente novamente.');return value.data;}
+function check<T extends {data:unknown;error:unknown}>(value:T):T['data'] {if(value.error){const accountMessage=accountUpdateErrorMessage(value.error);throw new HttpError(accountMessage?409:400,accountMessage??'Não foi possível concluir a operação. Verifique os dados e tente novamente.');}return value.data;}
 function assert(condition:unknown,message:string,status=400):asserts condition {if(!condition)throw new HttpError(status,message);}
 type Profile={id:string;company_id:string;full_name:string;username:string;role:string;active:boolean;must_change_password:boolean;password_expires_at:string|null;welcome_status:string;password_status:string};
 async function profileFor(id:string):Promise<Profile> {const {data}=await admin.from('profiles').select('*').eq('id',id).maybeSingle();assert(data,'Usuário não autorizado.',403);return data;}

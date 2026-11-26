@@ -1,3 +1,4 @@
+export const mailStatusLabel=(status?:string)=>status==='enviado'?'aceito pelo serviço de envio':status??'—';
 export type Role = 'system_admin' | 'admin' | 'manager' | 'technician';
 export type Status = 'pending' | 'in_progress' | 'third_party' | 'testing' | 'completed';
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';

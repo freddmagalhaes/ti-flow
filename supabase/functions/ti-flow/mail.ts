@@ -12,9 +12,9 @@ export function emailContent(kind:string,profile:{full_name:string;username:stri
  return {subject,html,text:text+(profile.email?' E-mail de acesso: '+profile.email+'. A empresa e o perfil são identificados automaticamente.':'')};
 }
 export async function sendEmail(id:string,to:string,content:ReturnType<typeof emailContent>) {
- if(setting('RESEND_API_KEY')){const result=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:`Bearer ${setting('RESEND_API_KEY')}`,'Content-Type':'application/json','Idempotency-Key':`ti-flow-${id}`},body:JSON.stringify({from:setting('MAIL_FROM'),to:[to],...content}),signal:AbortSignal.timeout(18000)});if(!result.ok)throw new Error('Mail provider rejected the request.');return;}
+ if(setting('RESEND_API_KEY')){const result=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:`Bearer ${setting('RESEND_API_KEY')}`,'Content-Type':'application/json','Idempotency-Key':`ti-flow-${id}`},body:JSON.stringify({from:setting('MAIL_FROM'),to:[to],...content}),signal:AbortSignal.timeout(18000)});if(!result.ok)throw new Error('Mail provider rejected the request.');const receipt=await result.json().catch(()=>({}));return typeof receipt.id==='string'&&receipt.id.length<=200?receipt.id:null;}
  // Supabase blocks outgoing ports 25 and 587; SMTP uses implicit TLS on 465.
  const nodemailer=await import('npm:nodemailer@10.6.0');
  const transport=nodemailer.default.createTransport({host:setting('SMTP_HOST'),port:465,secure:true,auth:{user:setting('SMTP_USER'),pass:setting('SMTP_PASSWORD')},connectionTimeout:10000,socketTimeout:18000,tls:{rejectUnauthorized:true}});
- try{await transport.sendMail({from:setting('MAIL_FROM'),to,...content,messageId:`<ti-flow-${id}@${new URL(setting('APP_URL')!).hostname}>`});}finally{transport.close();}
+ try{await transport.sendMail({from:setting('MAIL_FROM'),to,...content,messageId:`<ti-flow-${id}@${new URL(setting('APP_URL')!).hostname}>`});}finally{transport.close();}return null;
 }

@@ -48,6 +48,7 @@ beforeAll(async()=>{
  await db.exec(await readFile(new URL('../supabase/migrations/20261123125328_allow_unfinished_activity_deletion.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261123132026_activity_email_notifications.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261126153720_resend_access_email_pair.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261126154607_fix_resend_identity_lookup.sql',import.meta.url),'utf8'));
 },30000);
 beforeEach(async()=>{await root();await db.exec('begin');});
 afterEach(async()=>{await db.exec('rollback;reset role');});
@@ -55,15 +56,16 @@ afterAll(async()=>{await db?.close();});
 
 describe('Re-sending access emails',()=>{
  it('creates a fresh welcome and blocked password even after an earlier welcome was sent',async()=>{
-  await root();await db.query("update profiles set welcome_status='enviado',password_status='enviado' where id=$1",[adminA]);
+  await root();await db.query("select set_config('request.jwt.claims','{\"role\":\"service_role\"}',false)");await db.exec('set role service_role');await db.query("update profiles set welcome_status='enviado',password_status='enviado' where id=$1",[adminA]);
   await db.query("select requeue_access_emails($1,'Admina@example.invalid','cipher-one')",[adminA]);
+  expect((await db.query("select has_table_privilege('service_role','auth.users','select') as allowed")).rows[0]).toMatchObject({allowed:false});
   const before=(await db.query<{id:string;kind:string;state:string}>('select id,kind,state from email_jobs where user_id=$1',[adminA])).rows;expect(before).toHaveLength(2);expect(before.find(j=>j.kind==='welcome')?.state).toBe('scheduled');expect(before.find(j=>j.kind==='password')?.state).toBe('blocked');
   await db.query("select requeue_access_emails($1,'Admina@example.invalid','cipher-two')",[adminA]);
   const after=(await db.query<{id:string;kind:string;state:string;encrypted_payload:string|null}>('select id,kind,state,encrypted_payload from email_jobs where user_id=$1',[adminA])).rows;
   expect(after.filter(j=>j.state!=='cancelled')).toHaveLength(2);expect(after.filter(j=>before.some(b=>b.id===j.id)).every(j=>j.state==='cancelled'&&j.encrypted_payload===null)).toBe(true);
  });
  it('waits two minutes after welcome acceptance and protects against stale worker callbacks',async()=>{
-  await root();await db.query("select requeue_access_emails($1,'Admina@example.invalid','cipher')",[adminA]);
+  await root();await db.query("select set_config('request.jwt.claims','{\"role\":\"service_role\"}',false)");await db.exec('set role service_role');await db.query("select requeue_access_emails($1,'Admina@example.invalid','cipher')",[adminA]);
   const welcome=(await db.query<{id:string;kind:string;claim_token:string}>('select * from claim_email_jobs()')).rows[0];expect(welcome.kind).toBe('welcome');
   await db.query('select finish_email_job($1,$2,true)',[welcome.id,welcome.claim_token]);
   const password=(await db.query<{state:string;delay:number}>("select state,extract(epoch from send_at-now()) as delay from email_jobs where user_id=$1 and kind='password'",[adminA])).rows[0];expect(password.state).toBe('scheduled');expect(Number(password.delay)).toBe(120);

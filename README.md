@@ -214,3 +214,9 @@ O reenvio sempre cria um novo par de boas-vindas e senha temporária com IDs in�
 Meu perfil e Dados do usuário permitem iniciais, oito ilustrações locais ou uma foto. O seletor aceita JPG, PNG e WebP de até 5 MB e prepara um JPEG quadrado de 512 px, removendo metadados na conversão. A API valida tamanho, assinatura JPEG e dimensões e grava apenas em uma pasta do usuário no bucket privado profile-avatars. O caminho de Storage nunca é aceito do cliente. Trocar a imagem remove a anterior após salvar o perfil, e uma falha limpa apenas o novo arquivo.
 
 Fotos são lidas por URLs assinadas de uma hora, respeitando as políticas de empresa; presets são SVGs locais. O cache de links é separado por usuário autenticado e renovado durante a sessão. Os avatares aparecem no cabeçalho, barra lateral, equipe, cards e comentários. E-mail, login, empresa e permissões continuam protegidos. A migração profile_avatars deve anteceder a função e o frontend.
+
+## Subtarefas com datas e dependência
+
+O Checklist permite informar início e fim previstos, opcionais, e iniciar cada subtarefa manualmente. A opção “Bloquear a próxima até concluir esta” exige a conclusão real da subtarefa anterior, independentemente das datas previstas. Sem a opção, os passos podem ocorrer em paralelo. Para reabrir uma etapa que bloqueia uma próxima já iniciada, retorne primeiro a próxima para A fazer. A validação ocorre também no banco e não permite concluir a anterior e iniciar a seguinte no mesmo envio.
+
+A migração scheduled_dependent_subtasks deve anteceder o frontend. Checklists existentes permanecem compatíveis; datas e horários históricos não são inventados. Ao reabrir um card concluído, a cópia mantém o planejamento e as dependências, reiniciando o progresso e os horários reais. O card original continua imutável e as permissões existentes são preservadas. O guia público do quadro explica a funcionalidade.

@@ -6,7 +6,7 @@ export type View = 'board' | 'dashboard' | 'archive' | 'team' | 'companies' | 'n
 export interface Company {legal_name?:string;tax_id?:string;contact_email?:string;phone?:string;address?:string;website?:string;id:string;name:string;slug:string;active:boolean;created_at:string}
 export interface CompanyInput {name:string;slug:string;administrator:{full_name:string;username:string;email:string}}
 export interface Profile {avatar_preset?:string;avatar_path?:string;avatar_url?:string;phone?:string;job_title?:string;department?:string; id:string;company_id:string; full_name:string; username:string; role:Role; active:boolean; must_change_password:boolean; email?:string; welcome_status?:string; password_status?:string; }
-export interface ChecklistItem {id:string; text:string; done:boolean}
+export interface ChecklistItem {id:string; text:string; done:boolean;started?:boolean;start_date?:string;due_date?:string;block_next?:boolean;started_at?:string|null;completed_at?:string|null}
 export interface Comment {id:string; text:string; author:string; author_id:string; created_at:string}
 export interface Attachment {id:string; name:string; size:number; type:string; path:string; created_at:string}
 export interface Card {deleted_at?:string|null;deleted_by?:string|null;id:string;company_id:string; number:number; code:string; root_id:string; parent_id:string|null; title:string; description:string; status:Status; priority:Priority; assignee_id:string; created_by:string; start_date:string; due_date:string; created_at:string; updated_at:string; closed_at:string|null; closed_by:string|null; version:number; position:number; checklist:ChecklistItem[]; comments:Comment[]; attachments:Attachment[]; reopen_reason:string|null;}

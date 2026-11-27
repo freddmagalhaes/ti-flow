@@ -50,10 +50,37 @@ beforeAll(async()=>{
  await db.exec(await readFile(new URL('../supabase/migrations/20261126153720_resend_access_email_pair.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261126154607_fix_resend_identity_lookup.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261126155504_profile_avatars.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261127130939_scheduled_dependent_subtasks.sql',import.meta.url),'utf8'));
 },30000);
 beforeEach(async()=>{await root();await db.exec('begin');});
 afterEach(async()=>{await db.exec('rollback;reset role');});
 afterAll(async()=>{await db?.close();});
+
+describe('Scheduled dependent subtasks in the database',()=>{
+ const tasks=()=>[{id:'a',text:'Etapa A',done:false,block_next:true,start_date:'2026-12-01',due_date:'2026-12-05'},{id:'b',text:'Etapa B',done:false,start_date:'2026-12-05',due_date:'2026-12-09'}];
+ async function set(id:string,items:unknown[]){return db.query('update activities set checklist=$1 where id=$2',[JSON.stringify(items),id]);}
+ it('blocks a direct API update starting or completing B before A, regardless of planned dates',async()=>{
+  await as(adminA);const c=await card(techA,companyA);const items=tasks();await set(c.id,items);
+  await rejected('update activities set checklist=$1 where id=$2',[JSON.stringify([items[0],{...items[1],started:true}]),c.id],/bloqueada/);
+  await rejected('update activities set checklist=$1 where id=$2',[JSON.stringify([items[0],{...items[1],done:true}]),c.id],/bloqueada/);
+  await rejected('update activities set checklist=$1 where id=$2',[JSON.stringify([{...items[0],done:true},{...items[1],started:true}]),c.id],/bloqueada/);
+  await set(c.id,[{...items[0],done:true},items[1]]);await set(c.id,[{...items[0],done:true},{...items[1],started:true}]);
+  const stored=(await db.query<{checklist:{started:boolean;started_at:string}[]}>('select checklist from activities where id=$1',[c.id])).rows[0].checklist;expect(stored[1].started).toBe(true);expect(stored[1].started_at).toBeTruthy();
+  await rejected('update activities set checklist=$1 where id=$2',[JSON.stringify([items[0],{...items[1],started:true}]),c.id],/bloqueada/);
+ });
+ it('supports parallel work without the flag and rejects invalid dates and duplicated identifiers',async()=>{
+  await as(adminA);const c=await card(techA,companyA),items=tasks();await set(c.id,[{...items[0],block_next:false},{...items[1],started:true}]);
+  for(const value of [[{...items[0],due_date:'2026-11-01'}],[{...items[0],start_date:'2026-02-30'}],[items[0],items[0]]])await rejected('update activities set checklist=$1 where id=$2',[JSON.stringify(value),c.id]);
+ });
+ it('retains planned dates and dependency flags on reopening while resetting progress and preserving the archived source',async()=>{
+  await as(adminA);const c=await card(techA,companyA),items=tasks();await set(c.id,items);await set(c.id,[{...items[0],done:true},items[1]]);const version=(await db.query<{version:number}>('select version from activities where id=$1',[c.id])).rows[0].version;await db.query('select complete_activity($1,$2)',[c.id,version]);
+  const copy=(await db.query<{checklist:{id:string;done:boolean;started:boolean;block_next:boolean;start_date:string;started_at:null}[]}>("select * from reopen_activity($1,'Retomar entrega',current_date,current_date,$2)",[c.id,techA])).rows[0];expect(copy.checklist[0]).toMatchObject({done:false,started:false,block_next:true,start_date:'2026-12-01',started_at:null});expect(copy.checklist[0].id).not.toBe('a');
+  expect((await db.query<{checklist:{done:boolean}[]}>('select checklist from activities where id=$1',[c.id])).rows[0].checklist[0].done).toBe(true);
+ });
+ it('keeps legacy checklists usable and derives actual start timestamps on the server',async()=>{
+  await as(adminA);const c=await card(techA,companyA);await set(c.id,[{id:'old',text:'Legado',done:false}]);await set(c.id,[{id:'old',text:'Legado',done:false,started:true,started_at:'1900-01-01'}]);const item=(await db.query<{checklist:{started_at:string}[]}>('select checklist from activities where id=$1',[c.id])).rows[0].checklist[0];expect(item.started_at).not.toContain('1900');
+ });
+});
 
 describe('Private profile pictures',()=>{
  it('keeps photo objects private across companies while allowing the system administrator',async()=>{

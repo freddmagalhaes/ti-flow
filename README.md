@@ -208,3 +208,9 @@ A fila privada usa chave única por evento/prazo/pessoa/período, lease, retenta
 ## Reenvio de acesso
 
 O reenvio sempre cria um novo par de boas-vindas e senha temporária com IDs inéditos. Jobs anteriores ainda pendentes são cancelados na mesma transação. A senha fica bloqueada até a aceitação das boas-vindas, e depois aguarda 120 segundos; a validade continua sendo 24 horas a partir da aceitação do envio. A função guarda o ID retornado pelo Resend para rastrear eventos sem registrar corpo ou senha. Aceitação pelo serviço de envio não comprova entrega na caixa de entrada; bloqueios, rejeições e quarentena devem ser conferidos no provedor. A geração de nova senha continua invalidando as sessões anteriores e exigindo troca no primeiro acesso.
+
+## Avatares de perfil
+
+Meu perfil e Dados do usuário permitem iniciais, oito ilustrações locais ou uma foto. O seletor aceita JPG, PNG e WebP de até 5 MB e prepara um JPEG quadrado de 512 px, removendo metadados na conversão. A API valida tamanho, assinatura JPEG e dimensões e grava apenas em uma pasta do usuário no bucket privado profile-avatars. O caminho de Storage nunca é aceito do cliente. Trocar a imagem remove a anterior após salvar o perfil, e uma falha limpa apenas o novo arquivo.
+
+Fotos são lidas por URLs assinadas de uma hora, respeitando as políticas de empresa; presets são SVGs locais. O cache de links é separado por usuário autenticado e renovado durante a sessão. Os avatares aparecem no cabeçalho, barra lateral, equipe, cards e comentários. E-mail, login, empresa e permissões continuam protegidos. A migração profile_avatars deve anteceder a função e o frontend.

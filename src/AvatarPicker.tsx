@@ -1,0 +1,17 @@
+import {useState} from 'react';
+import {Camera,Check} from 'lucide-react';
+export const avatarChoices=[['initials','Iniciais'],['sunny','Sol'],['orbit','Órbita'],['sprout','Broto'],['cosmo','Cosmo'],['pixel','Pixel'],['peach','Pêssego'],['bloom','Flor'],['wave','Maré']];
+export function avatarSource(profile?:{avatar_preset?:string;avatar_url?:string}){return profile?.avatar_preset==='photo'?profile.avatar_url:avatarChoices.some(([id])=>id===profile?.avatar_preset)&&profile?.avatar_preset!=='initials'?'/avatars/'+profile?.avatar_preset+'.svg':undefined;}
+export async function prepareProfilePhoto(file:File){
+ if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>5*1024*1024)throw new Error('Escolha uma foto JPG, PNG ou WebP de até 5 MB.');
+ const image=await createImageBitmap(file);try{
+  if(image.width<32||image.height<32||image.width>16000||image.height>16000)throw new Error('Escolha uma foto com dimensões entre 32 e 16.000 pixels.');
+  const canvas=document.createElement('canvas');canvas.width=512;canvas.height=512;const context=canvas.getContext('2d');if(!context)throw new Error('O navegador não conseguiu preparar a foto.');
+  context.fillStyle='#ffffff';context.fillRect(0,0,512,512);const side=Math.min(image.width,image.height);context.drawImage(image,(image.width-side)/2,(image.height-side)/2,side,side,0,0,512,512);
+  return canvas.toDataURL('image/jpeg',.85);
+ }finally{image.close();}
+}
+export default function AvatarPicker({preset,photo,initials,disabled,onChange,onBusyChange}:{preset:string;photo?:string;initials:string;disabled:boolean;onChange:(preset:string,image?:string)=>void;onBusyChange:(busy:boolean)=>void}){
+ const [preparing,setPreparing]=useState(false),[error,setError]=useState('');const source=avatarSource({avatar_preset:preset,avatar_url:photo});
+ return <section className="avatar-editor" aria-label="Avatar do perfil"><div className="avatar-editor-heading"><span className="avatar-preview">{source?<img src={source} alt="Prévia do seu avatar"/>:<span>{initials}</span>}<i><Camera size={14}/></i></span><div><strong>Seu jeito, seu Flow.</strong><p>Escolha uma companhia alegre para o dia a dia ou use uma foto sua.</p></div></div><div className="avatar-picker-grid" role="group" aria-label="Avatares disponíveis">{avatarChoices.map(([id,label])=><button className={`avatar-choice ${preset===id?'avatar-choice-selected':''}`} type="button" key={id} aria-label={`Avatar ${label}`} aria-pressed={preset===id} disabled={disabled||preparing} onClick={()=>{setError('');onChange(id);}}>{id==='initials'?<span className="avatar-initials-choice">{initials}</span>:<img src={'/avatars/'+id+'.svg'} alt=""/>}{preset===id&&<i><Check size={11}/></i>}<small>{label}</small></button>)}</div><label className="avatar-photo-upload"><Camera size={17}/>{preparing?'Preparando foto…':preset==='photo'?'Trocar minha foto':'Enviar minha foto'}<input type="file" accept="image/jpeg,image/png,image/webp" disabled={disabled||preparing} onChange={async e=>{const file=e.target.files?.[0];e.target.value='';if(!file)return;setError('');setPreparing(true);onBusyChange(true);try{onChange('photo',await prepareProfilePhoto(file));}catch(e){setError(e instanceof Error?e.message:'Não foi possível abrir a foto.');}finally{setPreparing(false);onBusyChange(false);}}}/></label><small className="avatar-photo-hint">JPG, PNG ou WebP · até 5 MB. Recorte quadrado central, salvo apenas ao confirmar os dados.</small>{error&&<p className="form-error" role="alert">{error}</p>}</section>;
+}

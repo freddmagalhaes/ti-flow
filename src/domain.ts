@@ -5,7 +5,7 @@ export type Priority = 'low' | 'medium' | 'high' | 'urgent';
 export type View = 'board' | 'dashboard' | 'archive' | 'team' | 'companies' | 'newsletter' | 'contacts' | 'billing' | 'settings';
 export interface Company {legal_name?:string;tax_id?:string;contact_email?:string;phone?:string;address?:string;website?:string;id:string;name:string;slug:string;active:boolean;created_at:string}
 export interface CompanyInput {name:string;slug:string;administrator:{full_name:string;username:string;email:string}}
-export interface Profile {phone?:string;job_title?:string;department?:string; id:string;company_id:string; full_name:string; username:string; role:Role; active:boolean; must_change_password:boolean; email?:string; welcome_status?:string; password_status?:string; }
+export interface Profile {avatar_preset?:string;avatar_path?:string;avatar_url?:string;phone?:string;job_title?:string;department?:string; id:string;company_id:string; full_name:string; username:string; role:Role; active:boolean; must_change_password:boolean; email?:string; welcome_status?:string; password_status?:string; }
 export interface ChecklistItem {id:string; text:string; done:boolean}
 export interface Comment {id:string; text:string; author:string; author_id:string; created_at:string}
 export interface Attachment {id:string; name:string; size:number; type:string; path:string; created_at:string}

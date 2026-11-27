@@ -49,10 +49,24 @@ beforeAll(async()=>{
  await db.exec(await readFile(new URL('../supabase/migrations/20261123132026_activity_email_notifications.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261126153720_resend_access_email_pair.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261126154607_fix_resend_identity_lookup.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261126155504_profile_avatars.sql',import.meta.url),'utf8'));
 },30000);
 beforeEach(async()=>{await root();await db.exec('begin');});
 afterEach(async()=>{await db.exec('rollback;reset role');});
 afterAll(async()=>{await db?.close();});
+
+describe('Private profile pictures',()=>{
+ it('keeps photo objects private across companies while allowing the system administrator',async()=>{
+  await root();const path=techA+'/00000000-0000-4000-8000-000000000099.jpg';await db.query("insert into storage.objects(bucket_id,name) values('profile-avatars',$1)",[path]);
+  await as(techA);expect((await db.query("select name from storage.objects where bucket_id='profile-avatars'")).rows).toHaveLength(1);
+  await as(adminB);expect((await db.query("select name from storage.objects where bucket_id='profile-avatars'")).rows).toHaveLength(0);
+  await as(system);expect((await db.query("select name from storage.objects where bucket_id='profile-avatars'")).rows).toHaveLength(1);
+  await as(techA);await rejected("insert into storage.objects(bucket_id,name) values('profile-avatars',$1)",[techA+'/00000000-0000-4000-8000-000000000098.jpg']);
+ });
+ it('rejects foreign profile photo paths and arbitrary preset identifiers',async()=>{
+  await root();await rejected("update profiles set avatar_path=$1 where id=$2",[techB+'/00000000-0000-4000-8000-000000000099.jpg',techA]);await rejected("update profiles set avatar_preset='arbitrary' where id=$1",[techA]);
+ });
+});
 
 describe('Re-sending access emails',()=>{
  it('creates a fresh welcome and blocked password even after an earlier welcome was sent',async()=>{

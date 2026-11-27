@@ -1,9 +1,11 @@
+import {avatarPresets} from './avatar-data.ts';
 type Input=Record<string,unknown>;
 const text=(value:unknown,max:number)=>{if(typeof value!=='string'||value.trim().length>max)throw new Error('Confira os dados informados.');return value.trim();};
 export function profileChanges(input:Input){
- if(Object.keys(input).some(key=>!['full_name','phone','job_title','department'].includes(key)))throw new Error('E-mail, login, empresa e permissões são protegidos.');
+ if(Object.keys(input).some(key=>!['full_name','phone','job_title','department','avatar_preset'].includes(key)))throw new Error('E-mail, login, empresa e permissões são protegidos.');
  const full_name=text(input.full_name,160);if(full_name.length<2)throw new Error('Informe seu nome completo.');
- return {full_name,phone:text(input.phone??'',30),job_title:text(input.job_title??'',100),department:text(input.department??'',100)};
+ const avatar_preset=input.avatar_preset;if(avatar_preset!==undefined&&!avatarPresets.includes(avatar_preset as typeof avatarPresets[number]))throw new Error('Escolha um avatar disponível.');
+ return {...(avatar_preset!==undefined?{avatar_preset:avatar_preset as string}:{}),full_name,phone:text(input.phone??'',30),job_title:text(input.job_title??'',100),department:text(input.department??'',100)};
 }
 export function companyChanges(input:Input){
  if(Object.keys(input).some(key=>!['name','legal_name','tax_id','contact_email','phone','address','website'].includes(key)))throw new Error('Identificador e situação da empresa são protegidos.');

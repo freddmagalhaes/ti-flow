@@ -1,4 +1,5 @@
 import {notificationSettings,processActivityEmails} from './activity-emails.ts';
+import {saveProfileImage} from './profile-images.ts';
 import {billingOverview,setupBilling,subscribeCompany,syncPayments,cancelSubscription,billingWebhook,billingEnvironment} from './billing.ts';
 import {contactInput,processContactMessages} from './contact.ts';
 import {profileChanges,companyChanges} from './profile-data.ts';
@@ -165,8 +166,7 @@ Deno.serve(async request=>{
   }
   if(action==='account/profile')return respond({profile:{...profile,email:await getEmail(profile.id)}});
   if(action==='account/update-profile'){
-   let changes;try{changes=profileChanges(body);}catch(e){throw new HttpError(400,(e as Error).message);}
-   check(await admin.from('profiles').update(changes).eq('id',profile.id));return respond({ok:true});
+   try{await saveProfileImage(admin,profile,body);}catch(e){throw new HttpError(400,(e as Error).message);}return respond({ok:true});
   }
   if(action==='company/update-details'){
    const companyId=String(body.company_id??profile.company_id);
@@ -228,7 +228,7 @@ Deno.serve(async request=>{
   if(['admin/set-active','admin/set-role','admin/resend','admin/update-profile'].includes(action)){
    const target=await profileFor(String(body.id??''));
    assert(canAdminAccount(profile,target)&&target.company_id===companyId,'Usuário indisponível ou sem permissão.',403);
-   if(action==='admin/update-profile'){let changes;try{changes=profileChanges(body.changes??{});}catch(e){throw new HttpError(400,(e as Error).message);}check(await admin.from('profiles').update(changes).eq('id',target.id));return respond({ok:true});}
+   if(action==='admin/update-profile'){try{await saveProfileImage(admin,target,body.changes??{});}catch(e){throw new HttpError(400,(e as Error).message);}return respond({ok:true});}
    if(action==='admin/set-active'){
     assert(body.id!==profile.id,'Você não pode desativar sua própria conta.');assert(typeof body.active==='boolean','Situação inválida.');
     check(await admin.from('profiles').update({active:body.active}).eq('id',target.id));
